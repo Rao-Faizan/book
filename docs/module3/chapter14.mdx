@@ -1,0 +1,373 @@
+---
+title: "Chapter 14: Nav2 for Bipedal Navigation"
+description: "Configure ROS 2 Navigation Stack (Nav2) for humanoid robots, including footstep planning, behavior trees, and SLAM integration"
+sidebar_position: 14
+---
+
+# Chapter 14: Nav2 for Bipedal Navigation
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+
+- **Understand** the Nav2 architecture and its suitability for legged robots
+- **Configure** Costmaps for non-circular, humanoid footprints
+- **Select** appropriate global and local planners for bipedal locomotion
+- **Design** Behavior Trees for complex navigation logic
+- **Implement** recovery behaviors specific to legged robots
+- **Integrate** Nav2 with Isaac ROS Visual SLAM
+- **Tune** navigation parameters for safe human-robot interaction
+
+**Prerequisites**: Chapter 13 (Isaac ROS SLAM), Module 1 (ROS 2)  
+**Estimated Time**: 75 minutes
+
+---
+
+## Nav2 Architecture Overview
+
+**Nav2** is the industry-standard navigation framework for ROS 2. While traditionally used for wheeled robots, it is highly adaptable for humanoids.
+
+### Core Components
+
+```mermaid
+graph TD
+    A[Goal Pose] --> B[Behavior Tree Navigator]
+    B --> C[Global Planner]
+    B --> D[Controller (Local Planner)]
+    B --> E[Recovery Behaviors]
+    
+    C --> F[Global Costmap]
+    D --> G[Local Costmap]
+    
+    F --> H[Sensor Data<br/>LiDAR/Depth]
+    G --> H
+    
+    D --> I[Cmd Vel / Footsteps]
+    I --> J[Robot HW / Sim]
+    
+    style B fill:#76B900
+```
+
+### Humanoid-Specific Challenges
+
+| Feature | Wheeled Robot | Humanoid Robot |
+|---------|---------------|----------------|
+| **Motion** | Continuous rolling | Discrete footsteps |
+| **Stability** | Static stability | Dynamic balance required |
+| **Footprint** | Static rectangle/circle | Changing support polygon |
+| **Recovery** | Backup/Spin | Step in place/Crouch |
+
+---
+
+## configuring Nav2 for Humanoids
+
+### 1. Installation
+
+```bash
+# Install Nav2 packages
+sudo apt install ros-humble-navigation2 \
+  ros-humble-nav2-bringup \
+  ros-humble-nav2-smac-planner
+```
+
+### 2. Robot Footprint Configuration
+
+Humanoids have a rectangular footprint that shouldn't be approximated as a circle.
+
+**In `nav2_params.yaml`**:
+
+```yaml
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      # Humanoid dimensions (e.g., Unitree G1)
+      footprint: "[ [0.15, 0.25], [0.15, -0.25], [-0.15, -0.25], [-0.15, 0.25] ]"
+      robot_radius: 0.0  # Must be 0.0 if footprint is defined
+      inflation_layer:
+        cost_scaling_factor: 3.0  # Sharp cost decay
+        inflation_radius: 0.45    # Keep distance from walls
+```
+
+---
+
+## Global Planner: Smac Planner
+
+For non-circular robots, the **Smac Planner Hybrid A*** is ideal as it considers orientation and non-holonomic constraints.
+
+**Configuration**:
+
+```yaml
+planner_server:
+  ros__parameters:
+    planner_plugins: ["GridBased"]
+    GridBased:
+      plugin: "nav2_smac_planner/SmacPlannerHybrid"
+      downsampling_factor: 1
+      tolerance: 0.5
+      allow_unknown: true
+      max_iterations: 1000000
+      max_on_approach_iterations: 1000
+      max_planning_time: 2.0
+      motion_model_for_search: "DUBIN"  # Or "REEDS_SHEPP" which allows reversing
+      angle_quantization_bins: 72       # 5 degree increments
+      analytic_expansion_ratio: 3.5
+      minimum_turning_radius: 0.0       # humanoids can turn in place!
+      reverse_penalty: 2.0
+      change_penalty: 0.1
+      non_straight_penalty: 1.2
+```
+
+:::tip Humanoid Turning
+Since humanoids can turn in place (`minimum_turning_radius: 0.0`), Smac Planner creates efficient paths that rotate first, then walk straight.
+:::
+
+---
+
+## Local Planner (Controller): MPPI
+
+**MPPI (Model Predictive Path Integral)** is a powerful controller that handles complex dynamics better than DWB.
+
+**Configuration**:
+
+```yaml
+controller_server:
+  ros__parameters:
+    controller_plugins: ["FollowPath"]
+    FollowPath:
+      plugin: "nav2_mppi_controller::MPPIController"
+      time_steps: 56
+      model_dt: 0.05
+      batch_size: 2000
+      vx_std: 0.2
+      vy_std: 0.2
+      wz_std: 0.4
+      vx_max: 0.8
+      vx_min: -0.3
+      wz_max: 1.0
+      # Critical constraints for humanoids
+      Constraint1:
+        type: "cvar"
+        weight: 100.0
+        # Prevent sudden acceleration (causes falls)
+```
+
+---
+
+## Behavior Trees for Walking
+
+Behavior Trees (BTs) define the logic of navigation.
+
+### Default vs. Humanoid BT
+
+**Default BT**: 
+`ComputePathToPose` → `FollowPath` → `Recovery` if stuck.
+
+**Humanoid BT Modification**:
+We need to handle "Standing Up" or "Balancing" before moving.
+
+```xml
+<!-- humanoid_navigate.xml -->
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="6" name="NavigateRecovery">
+      <PipelineSequence name="NavigateWithReplanning">
+        
+        <!-- Check if robot is standing -->
+        <Condition ID="IsStanding" />
+        
+        <RateController hz="1.0">
+          <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+            <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+            <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_costmap"/>
+          </RecoveryNode>
+        </RateController>
+        
+        <RecoveryNode number_of_retries="1" name="FollowPath">
+          <FollowPath path="{path}" controller_id="FollowPath"/>
+          <ClearEntireCostmap name="ClearLocalCostmap-Context" service_name="local_costmap/clear_entirely_costmap"/>
+        </RecoveryNode>
+      </PipelineSequence>
+      
+      <!-- Recovery Behaviors -->
+      <ReactiveFallback name="RecoveryFallback">
+        <GoalUpdated/>
+        <RoundRobin name="RecoveryActions">
+          <Spin spin_dist="1.57"/>
+          <Wait wait_duration="5"/>
+          <BackUp backup_dist="0.15" backup_speed="0.05"/>
+        </RoundRobin>
+      </ReactiveFallback>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>
+```
+
+---
+
+## Integrating with Visual SLAM
+
+Module 13 showed how to set up `odom` and `map` frames. Now we connect Nav2.
+
+### Launch File Integration
+
+```python
+# humanoid_nav.launch.py
+from launch import LaunchDescription
+from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch_ros.substitutions import FindPackageShare
+
+def generate_launch_description():
+    pkg_nav2 = FindPackageShare('nav2_bringup')
+    
+    # Nav2 Launch
+    nav2_launch = IncludeLaunchDescription(
+        PathJoinSubstitution([pkg_nav2, 'launch', 'navigation_launch.py']),
+        launch_arguments={
+            'use_sim_time': 'true',
+            'params_file': 'path/to/humanoid_nav2_params.yaml'
+        }.items()
+    )
+    
+    return LaunchDescription([
+        nav2_launch
+    ])
+```
+
+**Workflow**:
+1. **Start Isaac Sim** (Chapter 12)
+2. **Start Isaac ROS Visual SLAM** (Chapter 13)
+3. **Start Nav2** (This Chapter)
+
+```bash
+ros2 launch nav2_bringup navigation_launch.py params_file:=humanoid_params.yaml
+```
+
+---
+
+## Velocity Smoother
+
+Humanoids are unstable. Sudden velocity changes cause falls. We use `nav2_velocity_smoother`.
+
+**Configuration**:
+
+```yaml
+velocity_smoother:
+  ros__parameters:
+    smoothing_frequency: 20.0
+    scale_velocities: false
+    feedback: "OPEN_LOOP"
+    max_velocity: [0.8, 0.0, 1.0]  # [x, y, theta]
+    min_velocity: [-0.3, 0.0, -1.0]
+    max_accel: [0.2, 0.0, 0.5]     # Low accel for stability!
+    max_decel: [-0.2, 0.0, -0.5]
+    deadband_velocity: [0.0, 0.0, 0.0]
+    velocity_timeout: 1.0
+```
+
+**Architecture**:
+
+```mermaid
+graph LR
+    A[Nav2 Controller] -->|/cmd_vel_nav| B[Velocity Smoother]
+    B -->|/cmd_vel| C[Robot Base Controller]
+```
+
+---
+
+## Footstep Planning (Conceptual)
+
+Standard Nav2 outputs continuous velocity (`geometry_msgs/Twist`). Humanoids need footsteps.
+
+**Twist-to-Footstep Converter Node**:
+
+```python
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import Twist
+from humanoid_msgs.msg import Footsteps
+
+class TwistToFootstep(Node):
+    def __init__(self):
+        super().__init__('twist_to_footstep')
+        self.sub = self.create_subscription(Twist, '/cmd_vel', self.cmd_cb, 10)
+        self.pub = self.create_publisher(Footsteps, '/walking/footsteps', 10)
+        
+    def cmd_cb(self, msg):
+        # Convert vx, wz to stride length and turn angle
+        stride_len = msg.linear.x * 0.5  # Simple scaling
+        turn_angle = msg.angular.z * 0.2
+        
+        # In a real system, use an inverse kinematics solver here
+        self.publish_footsteps(stride_len, turn_angle)
+```
+
+:::note Advanced
+For full footstep planning, advanced users replace the Nav2 Controller with a custom **ALIP (Angular Linear Inverted Pendulum)** planner plugin.
+:::
+
+---
+
+## Hands-On Exercise
+
+### Task: Humanoid Point-to-Point Navigation
+
+**Scenario**: Robot starts at (0,0) and acts autonomously to reach (5,5) avoiding obstacles.
+
+1. **Setup**:
+   - Isaac Sim Warehouse Scene
+   - Isaac ROS Visual SLAM running
+   - Nav2 stack configured with Smac Planner
+
+2. **Execution**:
+   - Use RViz2 "2D Goal Pose" tool to set target
+   - Watch global path generation (green line)
+   - Watch local costmap updates (inflated obstacles)
+   - Robot should walk smoothly without falling
+
+**Success Criteria**:
+- Path avoids obstacles by 0.45m margin
+- Max acceleration < 0.2 m/s²
+- Reaches goal within 0.5m tolerance
+- No falls (simulated)
+
+---
+
+## Troubleshooting
+
+### Issue 1: Robot Oscillates/Shakes
+
+**Cause**: Controller frequency too high or acceleration limits too high.  
+**Fix**: Increase `max_accel` constraints in velocity smoother. Lower controller frequency to 10-20Hz.
+
+### Issue 2: Rotates in Place Forever
+
+**Cause**: Goal tolerance too tight.  
+**Fix**: Increase `yaw_goal_tolerance` in controller server (e.g., to 0.1 rad).
+
+### Issue 3: Plans Through Obstacles
+
+**Cause**: Costmap inflation radius too small.  
+**Fix**: Increase `inflation_radius` to cover the robot's width + safety margin.
+
+---
+
+## Summary
+
+### 🎯 Key Takeaways
+
+- **Nav2** adapts to humanoids by defining accurate footprints and stability constraints
+- **Smac Planner** handles non-holonomic constraints better than NavFn
+- **Velocity Smoothing** is critical to prevent humanoid falls
+- **Behavior Trees** allow custom logic (like "Stand Up") before moving
+- **Integration** connects perception (Isaac ROS) to action (Nav2)
+
+**Next Chapter**: We will generate massive amounts of synthetic data to train even smarter agents!
+
+---
+
+:::note Chapter Completion
+✅ You've completed Chapter 14: Nav2 for Bipedal Navigation  
+⏱️ Estimated time to complete: 75 minutes  
+📊 Progress: Module 3 - Chapter 4 of 5
+:::

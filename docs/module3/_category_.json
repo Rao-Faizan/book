@@ -1,0 +1,8 @@
+{
+    "label": "Module 3: The AI-Robot Brain",
+    "position": 3,
+    "link": {
+        "type": "generated-index",
+        "description": "Master NVIDIA Isaac platform including Isaac Sim for GPU-accelerated simulation, Isaac ROS for hardware-accelerated perception, Nav2 navigation, and synthetic data generation for AI training."
+    }
+}
