@@ -1,0 +1,97 @@
+---
+id: 003
+title: Clarify Command Prerequisites Persistent Failure
+stage: spec
+date: 2025-12-07
+surface: agent
+model: claude-opus-4-5-20251101
+feature: physical-ai-robotics-textbook
+branch: 1-ai-robotics-book
+user: unknown
+command: /sp.clarify
+labels: ["prerequisites", "failure", "persistent"]
+links:
+  spec: null
+  ticket: null
+  adr: null
+  pr: null
+files:
+null
+tests:
+null
+---
+
+## Prompt
+
+```
+Aap `Spec-Kit Plus` ke liye ek **Unified Specification Prompt** de sakte hain, jahan aap sari requirements aur technical decisions (jaise Gemini ka use) ko ek jagah jama kar dein.
+
+Yeh prompt aapko ek **detailed technical specification** banane mein madad karega.
+
+-----
+
+## 📝 Unified Technical Specification Prompt
+
+Aap is prompt ko apne AI tool (jese Claude Code ya Spec-Kit Plus) mein istemal kar sakte hain:
+
+```
+"Generate a detailed, technical specification for the 'Physical AI & Humanoid Robotics' textbook platform. This specification must cover all required features and bonus scoring elements, outlining the complete system architecture and data flows.
+
+### Project Context:
+Textbook built on **Docusaurus**. The core requirement is bridging the gap between digital content and physical AI concepts.
+
+### Technology Stack Decisions:
+1.  **LLM/AI Engine:** Google Gemini SDK (using `text-embedding-004` and `gemini-2.5-flash`).
+2.  **Backend/API:** **FastAPI**.
+3.  **Vector Database:** **Qdrant Cloud Free Tier** (vector size must be **768**).
+4.  **Transactional DB:** **Neon Serverless Postgres**.
+5.  **Authentication:** **better-auth.com**.
+
+### Core Deliverable: Integrated RAG Chatbot (100 Points)
+1.  **Functionality:** The chatbot must answer questions based *only* on the textbook content stored in Qdrant.
+2.  **Selected Text RAG:** Implement a feature where the user can select text on the page, and the chatbot answers based *only* on that specific context (bypassing Qdrant search).
+3.  **Data Flow:** Describe the API structure for query processing (Frontend -> FastAPI -> Qdrant -> Gemini -> Frontend).
+
+### Bonus Features (Score Optimization):
+
+#### 1. Reusable Intelligence (50 Points)
+* **Requirement:** Implement at least two reusable **Agent Skills/Tools** (using Gemini Function Calling equivalent).
+* **Examples:** A `code_explainer(code_snippet)` tool and a `ros_command_lookup(topic)` tool.
+
+#### 2. Authentication and Profile Collection (50 Points)
+* Integrate **better-auth** for Signup/Signin.
+* **Data Collection:** At Signup, capture and store the user's **Software Background** (e.g., Python expertise level) and **Hardware Access** (e.g., RTX 4080 or Jetson Orin availability) in **Neon Postgres**.
+
+#### 3. Content Personalization (50 Points)
+* Implement a frontend button to trigger content personalization for the logged user.
+* **Logic:** The system must use the user's background (stored in Neon) to send a context-aware prompt to Gemini, asking it to **rewrite the current chapter section** (e.g., simplify the explanation for a beginner).
+
+#### 4. Urdu Translation (50 Points)
+* Implement a frontend button to translate the current chapter content to **Urdu** on demand using the Gemini API.
+
+### Required Output Sections:
+1.  System Architecture Diagram (showing data flow).
+2.  API Endpoints Table (for RAG, Auth, Personalization, Translation).
+3.  Qdrant Collection Schema (including payload metadata).
+4.  Data Models (for User Profile storage in Neon).
+"
+```
+
+## Response snapshot
+
+The prerequisite script for `/sp.clarify` continues to fail because `pwsh` (PowerShell) is not found in the execution environment.
+
+## Outcome
+
+- ✅ Impact: Unable to proceed with /sp.clarify. User interaction required to resolve environment issue.
+- 🧪 Tests: N/A
+- 📁 Files: N/A
+- 🔁 Next prompts: User needs to resolve the `pwsh` PATH issue or provide an alternative execution method.
+- 🧠 Reflection: The persistent failure to find `pwsh` indicates a fundamental environment configuration issue that the agent cannot resolve directly. Further attempts without user intervention or environment changes are unproductive.
+
+## Evaluation notes (flywheel)
+
+- Failure modes observed: `pwsh` not found in PATH for tool execution.
+- Graders run and results (PASS/FAIL): N/A
+- Prompt variant (if applicable): N/A
+- Next experiment (smallest change to try): N/A
