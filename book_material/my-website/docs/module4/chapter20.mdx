@@ -1,0 +1,170 @@
+---
+title: "Chapter 20: Deployment and Real-World Testing"
+description: "Deploy your VLA to the edge. Optimize for NVIDIA Jetson with TensorRT, containerize with Docker, and validate Sim-to-Real performance."
+sidebar_position: 5
+---
+
+# Chapter 20: Deployment and Real-World Testing
+
+## The Final Frontier: Reality
+
+Simulation is a safe haven. The real world is messy, chaotic, and dangerous. 
+In this final chapter, we take the "brain" you built in Chapter 19 and transplant it into a physical body (like the **Unitree Go2** or a custom **Jetson Orin** robot).
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+
+- **optimize** deep learning models using TensorRT for real-time edge inference
+- **Containerize** your entire ROS 2 stack using Docker for portability
+- **Deploy** the VLA pipeline to an NVIDIA Jetson Orin Nano/AGX
+- **Mitigate** the "Sim-to-Real Gap" using domain randomization and calibration
+- **Implement** Safety Monitors to prevent physical damage
+- **Present** your final Capstone Project with confidence
+
+**Prerequisites**: Chapter 19, NVIDIA Jetson Device (Optional but recommended)  
+**Estimated Time**: 120 minutes
+
+---
+
+## 1. Edge Optimization with TensorRT
+
+Running GPT-4, Whisper, and YOLO on a laptop is easy. Running them on an embedded Jetson requires **Optimization**.
+
+### Why TensorRT?
+
+NVIDIA TensorRT fuses layers and quantizes weights (FP32 $\to$ INT8), delivering **4x-10x speedups**.
+
+### Converting YOLO to TensorRT
+
+```bash
+# 1. Export PyTorch to ONNX
+yolo export model=yolov8n.pt format=onnx opset=11
+
+# 2. Compile ONNX to TensorRT Engine (on Jetson)
+/usr/src/tensorrt/bin/trtexec \
+  --onnx=yolov8n.onnx \
+  --saveEngine=yolov8n.engine \
+  --fp16  # Use Half Precision
+```
+
+### Inference in Python
+
+```python
+import tensorrt as trt
+# Load engine and allocate buffers...
+# (See Isaac ROS Use Case)
+```
+
+**Isaac ROS** handles this automatically if you provide the `.engine` file.
+
+---
+
+## 2. Containerization with Docker
+
+"It works on my machine" is not acceptable in robotics. We use **Docker** to ensure the robot runs exactly the same OS and libraries as development.
+
+### The Dockerfile
+
+```dockerfile
+FROM nvcr.io/nvidia/isaac/ros:humble-nav2-filesystem
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    python3-pip \
+    ros-humble-rmw-cyclonedds-cpp
+
+# Install Python requirements
+COPY requirements.txt .
+RUN pip3 install -r requirements.txt
+
+# Copy Source Code
+WORKDIR /ros2_ws
+COPY src src
+
+# Build
+RUN . /opt/ros/humble/setup.sh && colcon build
+```
+
+### Running on Jetson
+
+```bash
+docker run -it --net=host --runtime=nvidia --privileged \
+  -v /dev:/dev \
+  my-robot-image:latest \
+  ros2 launch capstone bringup.launch.py
+```
+
+---
+
+## 3. The Sim-to-Real Gap
+
+When you run your code on the real robot, it *will* fail. This is the **Reality Gap**.
+
+### Common Causes & Fixes
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| **Robot ignores trash** | Lighting is different | Add **Domain Randomization** (Ch 15) to training data. |
+| **Robot crashes** | Odometry drift | Calibrate **IMU** and Wheel Encoders. Use V-SLAM. |
+| **Grasp fails** | Object friction | Add **compliant foam** to gripper fingers. |
+| **Latency** | WiFi + weak CPU | Move inference to **Jetson GPU**. Use Wired Ethernet. |
+
+---
+
+## 4. Safety Protocols
+
+A 15kg robot moving at 1.0 m/s can break a leg (yours or its own).
+
+### The Software "Deadman Switch"
+
+Implement a heartbeat monitor. If the joystick/Wi-Fi disconnects, the robot must stop immediately.
+
+```python
+class SafetyMonitor(Node):
+    def __init__(self):
+        self.last_heartbeat = time.time()
+        self.create_timer(0.1, self.check_safety)
+        self.pub_stop = self.create_publisher(Twist, '/cmd_vel', 10)
+
+    def heartbeat_cb(self, msg):
+        self.last_heartbeat = time.time()
+
+    def check_safety(self):
+        if (time.time() - self.last_heartbeat) > 0.5:
+            # EMERGENCY STOP
+            self.pub_stop.publish(Twist()) # Zero velocity
+            self.get_logger().fatal("EMERGENCY STOP: Heartbeat Lost")
+```
+
+---
+
+## 5. Course Conclusion
+
+### You made it. 🎓
+
+You started with a definition of a node (Module 1).
+You built a digital twin physics simulation (Module 2).
+You mastered the NVIDIA Isaac ecosystem (Module 3).
+And finally, you gave your robot a voice, eyes, and a brain (Module 4).
+
+**What you have built is the foundation of the future.** 
+Physical AI - embodied intelligence - is just beginning.
+
+### Where to go from here?
+
+1. **Portfolio**: Record your Capstone video. Post it on LinkedIn/YouTube.
+2. **Community**: Join the ROS Discourse and NVIDIA Developer Forums.
+3. **Hardware**: Try running this on a humanoid like the **Unitree H1** or **Tesla Optimus** (sim).
+
+**Thank you for taking this journey with us.**
+
+---
+*End of Book.*
+---
+
+:::note Chapter Completion
+✅ You've completed Chapter 20: Deployment and Real-World Testing  
+⏱️ Estimated time to complete: 120 minutes  
+📊 Progress: Module 4 - Chapter 5 of 5
+:::

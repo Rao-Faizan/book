@@ -1,0 +1,31 @@
+/**
+ * CSS styles for the landing page
+ */
+
+.heroBanner {
+  padding: 4rem 0;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #1c1e21 0%, #2e8555 100%);
+}
+
+.hero__title {
+  color: white;
+}
+
+.hero__subtitle {
+  color: #a3b8cc;
+}
+
+.features {
+  display: flex;
+  align-items: center;
+  padding: 2rem 0;
+  width: 100%;
+}
+
+.featureImage {
+  height: 200px;
+  width: 200px;
+}

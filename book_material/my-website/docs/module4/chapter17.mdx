@@ -1,0 +1,301 @@
+---
+title: "Chapter 17: LLMs for Cognitive Planning"
+description: "Empower robots with human-like reasoning using Large Language Models (LLMs) to plan tasks, handle ambiguity, and generate actionable ROS 2 commands"
+sidebar_position: 2
+---
+
+# Chapter 17: LLMs for Cognitive Planning
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+
+- **Understand** how LLMs (GPT-4, LLaMA) can serve as high-level planners for robotics
+- **Design** effective prompts to translate natural language into robot actions
+- **Define** a "Robot Action Ontology" that LLMs can understand
+- **Integrate** OpenAI API with ROS 2 for real-time decision making
+- **Implement** structured output parsing (JSON/Function Calling) ensures reliable execution
+- **Build** a "Cognitive Node" that converts "Clean the room" into a sequence of atomic tasks
+- **Handle** errors and re-planning when the robot fails
+
+**Prerequisites**: Chapter 16 (Voice Interface), OpenAI API Key (or local LLM)  
+**Estimated Time**: 120 minutes
+
+---
+
+## From Commands to Reasoning
+
+In Chapter 16, we mapped "Move Forward" directly to `cmd_vel`. But what about "Fetch me a snack"?
+A simple `if-else` parser fails here. The robot needs **Reasoning**:
+1. What is a "snack"? (Apple, Chips)
+2. Where are they usually kept? (Kitchen, Table)
+3. How do I get there? (Navigate)
+4. How do I pick it up? (Grasp)
+
+**LLMs** provide this common-sense reasoning capability.
+
+---
+
+## The Cognitive Architecture
+
+We don't train the LLM to *control motors*. We use it as a **High-Level Planner**.
+
+```mermaid
+graph TD
+    A[User Command<br/>'Clean the table'] --> B[LLM Planner<br/>(Brain)]
+    B -->|Context + Prompt| C[Reasoning Chain]
+    C -->|Action Sequence| D[Action Dispatcher]
+    
+    D --> E[Nav2<br/>(Legs)]
+    D --> F[MoveIt<br/>(Arms)]
+    D --> G[Perception<br/>(Eyes)]
+    
+    E --> H[Success/Fail]
+    
+    H -->|Feedback| B
+```
+
+---
+
+## Step 1: Defining the Robot Ontology
+
+The LLM doesn't know what your robot *can* do. We must define an **API** for it.
+
+```text
+You are a home assistant robot.
+You can execute the following atomic actions:
+
+1. navigate(location: str) -> bool
+   - Moves to a named location.
+   - Locations: [kitchen, living_room, bedroom]
+
+2. pick(object_name: str) -> bool
+   - Grasps an object.
+   - Objects must be visible.
+
+3. place(location_name: str) -> bool
+   - Places held object.
+
+4. look_for(object_name: str) -> bool
+   - Rotates to find an object.
+
+Output your plan as a Python list of function calls.
+```
+
+---
+
+## Step 2: OpenAI API Integration
+
+Let's build a Python class `LLMPlanner` that wraps the OpenAI API.
+
+### Installation
+
+```bash
+pip install openai pydantic
+```
+
+### The Planner Class
+
+We use **JSON Mode** or **Function Calling** to ensure the LLM outputs valid code, not chatty text.
+
+```python
+import os
+import json
+from openai import OpenAI
+
+class LLMPlanner:
+    def __init__(self, api_key):
+        self.client = OpenAI(api_key=api_key)
+        self.system_prompt = """
+        You are a robot planner. Convert user instructions into a sequence of actions.
+        Available actions:
+        - navigate(location)
+        - look_for(object)
+        - pick(object)
+        - place(location)
+        
+        Return a JSON object with a key "plan" containing a list of strings.
+        Example: {"plan": ["navigate('kitchen')", "pick('apple')"]}
+        """
+
+    def generate_plan(self, user_command):
+        response = self.client.chat.completions.create(
+            model="gpt-4-turbo",
+            messages=[
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": user_command}
+            ],
+            response_format={"type": "json_object"}
+        )
+        
+        content = response.choices[0].message.content
+        return json.loads(content)["plan"]
+```
+
+---
+
+## Step 3: The Action Executor Node
+
+Now we need a ROS 2 node that receives this plan and executes it, one step at a time. It acts as the **Dispatcher**.
+
+```python
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+
+class ActionExecutor(Node):
+    def __init__(self):
+        super().__init__('action_executor')
+        self.sub_plan = self.create_subscription(String, '/llm/plan', self.plan_cb, 10)
+        
+        # Mock Clients for actual robot capabilities
+        self.get_logger().info("Action Executor Ready")
+
+    def plan_cb(self, msg):
+        import json
+        plan = json.loads(msg.data)
+        self.get_logger().info(f"Received Plan: {plan}")
+        self.execute_sequence(plan)
+
+    def execute_sequence(self, plan):
+        for action in plan:
+            self.get_logger().info(f"Executing: {action}")
+            success = self.parse_and_run(action)
+            if not success:
+                self.get_logger().error(f"Action failed: {action}")
+                return # Stop execution
+        self.get_logger().info("Plan Completed Successfully!")
+
+    def parse_and_run(self, action_str):
+        # Primitive parsing (in production, use Regex or AST)
+        import time
+        time.sleep(1) # Simulate execution time
+        return True # Mock success
+```
+
+---
+
+## Step 4: Prompt Engineering for Robotics
+
+To make the LLM reliable, we use specific prompting techniques.
+
+### 1. Chain of Thought (CoT)
+Ask the LLM to "think" before acting.
+
+> **Prompt**: "First, analyze the user's intent. Then, check if it's feasible. Finally, list the actions."
+
+### 2. State Awareness
+Inject the robot's current state into the system prompt.
+
+> **System Prompt Update**:
+> "Current State: [Location: Kitchen, Holding: None, Battery: 80%]"
+
+### 3. Error Recovery
+If an action fails, feed the error back to the LLM.
+
+**User**: "Put the apple on the table."
+**LLM**: `navigate('table')` -> `pick('apple')`
+**Robot**: Error: `pick('apple')` failed. Object not found.
+**LLM (Re-plan)**: "I see. I will look for it first." -> `look_for('apple')` -> `pick('apple')`
+
+---
+
+## Step 5: Complete Cognitive Node
+
+Let's combine Chapter 16 (Voice) + this Chapter into a `cognitive_agent.py`.
+
+```python
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+from llm_planner import LLMPlanner
+
+class CognitiveAgent(Node):
+    def __init__(self):
+        super().__init__('cognitive_agent')
+        self.planner = LLMPlanner(api_key="sk-...")
+        
+        # Input: Transcribed Text (from Ch 16)
+        self.sub_text = self.create_subscription(String, '/voice/text', self.text_cb, 10)
+        
+        # Output: JSON Plan
+        self.pub_plan = self.create_publisher(String, '/llm/plan', 10)
+
+    def text_cb(self, msg):
+        command = msg.data
+        self.get_logger().info(f"Thinking about: {command}")
+        
+        try:
+            plan = self.planner.generate_plan(command)
+            # Publish as JSON string
+            import json
+            plan_msg = String()
+            plan_msg.data = json.dumps(plan)
+            self.pub_plan.publish(plan_msg)
+            
+        except Exception as e:
+            self.get_logger().error(f"Planning failed: {e}")
+
+def main():
+    rclpy.init()
+    node = CognitiveAgent()
+    rclpy.spin(node)
+```
+
+---
+
+## Hands-On Exercise
+
+### Task: The "Smart" Butler
+
+**Scenario**: Simulation (Gazebo/Isaac Sim) with a robot, a kitchen, and a living room.
+**Command**: "I'm thirsty."
+
+1. **Setup**:
+   - Run `ActionExecutor` (mock or real Nav2 clients).
+   - Run `CognitiveAgent`.
+2. **Execution**:
+   - Publish "I'm thirsty" to `/voice/text`.
+3. **Observation**:
+   - LLM should infer: Thirsty -> Need Drink -> Water/Juice.
+   - Plan: `navigate('kitchen')` -> `pick('water')` -> `navigate('living_room')` -> `place('table')`.
+   - Executor runs these steps.
+
+**Success Criteria**:
+- LLM generates a valid logic chain (~3-4 steps).
+- Robot moves between locations in simulation.
+- System handles "impossible" requests (e.g., "Fly to the moon") by politely declining via TTS.
+
+---
+
+## Cost & Latency Considerations
+
+| Model | Intelligent? | Latency | Cost | Use Case |
+|-------|--------------|---------|------|----------|
+| **GPT-4** | Very High | 3-5s | $$$ | Complex planning, recovery |
+| **GPT-3.5** | High | 1-2s | $ | Standard commands |
+| **Llama-3-8b** | Med | \<1s (Local) | Free | Simple tasks, privacy |
+
+**Best Practice**: Use a **Hybrid Approach**. Use a small, fast model for simple commands ("Stop", "Go forward") and escalate to GPT-4 only for complex reasoning.
+
+---
+
+## Summary
+
+### 🎯 Key Takeaways
+
+- **LLMs** act as the "Pre-frontal Cortex" of the robot, handling reasoning and planning.
+- **Action Ontologies** act as the API layer between vague language and strict code.
+- **Prompt Engineering** (Context, CoT) is critical for reliability.
+- **Feedback Loops** allows the LLM to fix its own mistakes ("Grounding").
+- **Structured Output** (JSON) prevents parsing errors.
+
+**Next Chapter**: We've mastered Voice and Reasoning. Now we add **Vision**. A robot that can *see* "the red cup" and talk about it requires **Vision-Language Models (VLMs)**.
+
+---
+
+:::note Chapter Completion
+✅ You've completed Chapter 17: LLMs for Cognitive Planning  
+⏱️ Estimated time to complete: 120 minutes  
+📊 Progress: Module 4 - Chapter 2 of 5
+:::

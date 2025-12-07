@@ -1,0 +1,8 @@
+{
+    "label": "Module 4: VLA & Generative AI",
+    "position": 4,
+    "link": {
+        "type": "generated-index",
+        "description": "Integrate Vision-Language-Action (VLA) models, LLMs, and Generative AI into robotics covering Whisper, GPT-4, LLaVA, and autonomous agents."
+    }
+}

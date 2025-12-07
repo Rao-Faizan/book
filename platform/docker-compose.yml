@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - QDRANT_URL=${QDRANT_URL}
+      - QDRANT_API_KEY=${QDRANT_API_KEY}
+      - DATABASE_URL=${DATABASE_URL}
+    volumes:
+      - ./backend/app:/app/app
+
+  frontend:
+    image: node:18-alpine
+    working_dir: /app/website
+    volumes:
+      - ../book_material/my-website:/app/website
+    ports:
+      - "3000:3000"
+    command: npm run start -- --host 0.0.0.0

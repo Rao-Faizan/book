@@ -1,0 +1,414 @@
+---
+title: "Chapter 16: Voice-to-Action with OpenAI Whisper"
+description: "Implement speech-to-text for robots using OpenAI Whisper, create wake words, and map voice commands to ROS 2 actions"
+sidebar_position: 1
+---
+
+# Chapter 16: Voice-to-Action with OpenAI Whisper
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+
+- **Understand** the architecture of OpenAI Whisper and its advantages for robotics
+- **Capture** live audio streams in ROS 2 using PyAudio and `audio_common`
+- **Implement** a Wake Word engine (Porcupine) to activate your robot
+- **Transcribe** speech to text using both Whisper API and local GPU inference
+- **Extract** intents from text (e.g., "Move Forward" from "Please go ahead")
+- **Control** your robot's movement via voice commands
+- **Synthesize** speech (TTS) for robot feedback
+
+**Prerequisites**: Microphone connected (or simulator audio input), Module 1 (ROS 2 Basics)  
+**Estimated Time**: 90 minutes
+
+---
+
+## The Voice Interface
+
+Voice is the most natural interface for human-robot interaction (HRI). Historically, speech recognition was fragile and required cloud connection. **OpenAI Whisper** changed this by offering human-level accuracy even in noisy environments, with an open-source model that runs locally on GPUs (like Jetson).
+
+### Architecture Overview
+
+```mermaid
+graph LR
+    A[Microphone] --> B[Wake Word<br/>(Porcupine)]
+    B -->|Triggered| C[Audio Buffer]
+    C -->|Audio Clip| D[Whisper Model]
+    D -->|Text| E[Intent Parser]
+    E -->|Command| F[ROS 2 Action]
+    F --> G[Robot Motor]
+    E --> H[TTS Engine]
+    H -->|Audio| I[Speaker]
+    
+    style D fill:#76B900
+    style E fill:#F4A261
+```
+
+---
+
+## Step 1: Setting Up Audio Input
+
+We need a flexible way to capture audio in Python and publish it or process it. `PyAudio` is the standard library.
+
+### Installation
+
+```bash
+# Install system dependencies (PortAudio)
+sudo apt-get install python3-pyaudio portaudio19-dev
+
+# Install Python libraries
+pip install pyaudio numpy
+```
+
+### Audio Capture Node
+
+Let's create a ROS 2 node `audio_capture.py` that listens to the microphone.
+
+```python
+import rclpy
+from rclpy.node import Node
+import pyaudio
+import numpy as np
+from std_msgs.msg import Int16MultiArray
+
+class AudioCaptureNode(Node):
+    def __init__(self):
+        super().__init__('audio_capture')
+        self.pub = self.create_publisher(Int16MultiArray, 'audio_raw', 10)
+        
+        # Audio Params
+        self.chunk = 1024
+        self.format = pyaudio.paInt16
+        self.channels = 1
+        self.rate = 16000  # Whisper prefers 16kHz
+        
+        self.p = pyaudio.PyAudio()
+        self.stream = self.p.open(
+            format=self.format,
+            channels=self.channels,
+            rate=self.rate,
+            input=True,
+            frames_per_buffer=self.chunk
+        )
+        
+        self.timer = self.create_timer(0.01, self.capture_callback)
+        self.get_logger().info("Microphone initialized")
+
+    def capture_callback(self):
+        try:
+            data = self.stream.read(self.chunk, exception_on_overflow=False)
+            # Convert to numpy and publish
+            audio_data = np.frombuffer(data, dtype=np.int16)
+            msg = Int16MultiArray()
+            msg.data = audio_data.tolist()
+            self.pub.publish(msg)
+        except Exception as e:
+            self.get_logger().error(f"Error capturing audio: {e}")
+
+def main():
+    rclpy.init()
+    node = AudioCaptureNode()
+    rclpy.spin(node)
+```
+
+---
+
+## Step 2: Wake Word Detection
+
+Streaming *all* audio to a large model is inefficient and privacy-invasive. Robots needs a "Wake Word" (like "Hey Robot") to start listening. We'll use **Porcupine** by Picovoice (lightweight, runs on CPU).
+
+### Installation
+
+```bash
+pip install pvporcupine pyaudio
+```
+
+### Wake Word Node
+
+```python
+import rclpy
+from rclpy.node import Node
+import pvporcupine
+import pyaudio
+import struct
+from std_msgs.msg import Bool
+
+class WakeWordNode(Node):
+    def __init__(self):
+        super().__init__('wake_word_detector')
+        self.pub = self.create_publisher(Bool, '/voice/wake_word', 10)
+        
+        # Initialize Porcupine (default keyword: 'porcupine', 'jarvis', 'picovoice')
+        self.porcupine = pvporcupine.create(keywords=["jarvis"])
+        
+        self.pa = pyaudio.PyAudio()
+        self.audio_stream = self.pa.open(
+            rate=self.porcupine.sample_rate,
+            channels=1,
+            format=pyaudio.paInt16,
+            input=True,
+            frames_per_buffer=self.porcupine.frame_length
+        )
+        
+        self.listening_timer = self.create_timer(0.05, self.listen_loop)
+        self.get_logger().info("Listening for 'Jarvis'...")
+
+    def listen_loop(self):
+        pcm = self.audio_stream.read(self.porcupine.frame_length)
+        pcm = struct.unpack_from("h" * self.porcupine.frame_length, pcm)
+        
+        keyword_index = self.porcupine.process(pcm)
+        if keyword_index >= 0:
+            self.get_logger().info("Wake Word Detected!")
+            msg = Bool()
+            msg.data = True
+            self.pub.publish(msg)
+```
+
+---
+
+## Step 3: Integrating OpenAI Whisper
+
+When the wake word is detected, we record audio for ~5 seconds (or until silence) and send it to Whisper.
+
+### Option A: Whisper API (Cloud)
+
+Higher accuracy (Large-v3 model), slower latency, costs money.
+
+```python
+from openai import OpenAI
+client = OpenAI(api_key="sk-...")
+
+def transcribe_cloud(audio_file_path):
+    with open(audio_file_path, "rb") as audio_file:
+        transcript = client.audio.transcriptions.create(
+            model="whisper-1", 
+            file=audio_file
+        )
+    return transcript.text
+```
+
+### Option B: Local Whisper (GPU)
+
+Free, private, works offline. Use `distil-whisper` or `tiny/base` models for speed on Jetson.
+
+```bash
+pip install openai-whisper torch
+```
+
+```python
+import whisper
+model = whisper.load_model("base")  # 'base' or 'small' is good for robotics
+
+def transcribe_local(audio_file_path):
+    result = model.transcribe(audio_file_path)
+    return result["text"]
+```
+
+---
+
+## Step 4: Connecting the Pipeline
+
+Let's create `voice_commander.py`. This node:
+1. Subscribes to `/voice/wake_word`.
+2. Records audio for 4 seconds using PyAudio.
+3. Transcribes using Whisper.
+4. Parses text intent.
+5. Publishes to `/cmd_vel` to move the robot.
+
+### Intent Parser (Simple Regex)
+
+Robots need **Actions**, not just text.
+
+```python
+def parse_command(text):
+    text = text.lower()
+    msg = Twist()
+    
+    if "forward" in text or "go" in text:
+        msg.linear.x = 0.5
+        return msg, "Moving forward"
+        
+    elif "back" in text:
+        msg.linear.x = -0.3
+        return msg, "Backing up"
+        
+    elif "left" in text:
+        msg.angular.z = 1.0
+        return msg, "Turning left"
+        
+    elif "right" in text:
+        msg.angular.z = -1.0
+        return msg, "Turning right"
+        
+    elif "stop" in text or "halt" in text:
+        return msg, "Stopping"  # Zero velocity
+        
+    return None, "I didn't understand that."
+```
+
+### The Full Node
+
+```python
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import Bool, String
+from geometry_msgs.msg import Twist
+import pyaudio
+import wave
+import whisper
+import os
+
+class VoiceCommander(Node):
+    def __init__(self):
+        super().__init__('voice_commander')
+        
+        # ROS 2 Interfaces
+        self.sub_wake = self.create_subscription(Bool, '/voice/wake_word', self.wake_cb, 10)
+        self.pub_vel = self.create_publisher(Twist, '/cmd_vel', 10)
+        self.pub_feedback = self.create_publisher(String, '/voice/feedback', 10)
+        
+        # Whisper Model
+        self.get_logger().info("Loading Whisper model...")
+        self.model = whisper.load_model("base")
+        self.get_logger().info("Whisper model loaded!")
+        
+        self.recording = False
+
+    def wake_cb(self, msg):
+        if msg.data and not self.recording:
+            self.recording = True
+            self.record_and_process()
+
+    def record_and_process(self):
+        self.get_logger().info("Recording command...")
+        
+        # Record 3 seconds
+        CHUNK = 1024
+        FORMAT = pyaudio.paInt16
+        CHANNELS = 1
+        RATE = 16000
+        RECORD_SECONDS = 3
+        WAVE_OUTPUT_FILENAME = "/tmp/command.wav"
+
+        p = pyaudio.PyAudio()
+        stream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
+        frames = []
+
+        for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
+            data = stream.read(CHUNK)
+            frames.append(data)
+
+        stream.stop_stream()
+        stream.close()
+        p.terminate()
+
+        # Save WAV
+        wf = wave.open(WAVE_OUTPUT_FILENAME, 'wb')
+        wf.setnchannels(CHANNELS)
+        wf.setsampwidth(p.get_sample_size(FORMAT))
+        wf.setframerate(RATE)
+        wf.writeframes(b''.join(frames))
+        wf.close()
+
+        # Transcribe
+        self.get_logger().info("Transcribing...")
+        result = self.model.transcribe(WAVE_OUTPUT_FILENAME)
+        text = result["text"]
+        self.get_logger().info(f"Heard: '{text}'")
+
+        # Execute
+        cmd_vel, response = self.parse_command(text)
+        
+        # Publish Feedback
+        self.pub_feedback.publish(String(data=response))
+        
+        if cmd_vel:
+            self.pub_vel.publish(cmd_vel)
+            self.get_logger().info(f"Executed: {response}")
+            
+        self.recording = False
+
+    def parse_command(self, text):
+        # (Insert parsing logic from above)
+        text = text.lower()
+        msg = Twist()
+        
+        if "forward" in text or "go" in text:
+            msg.linear.x = 0.5
+            return msg, "Moving forward"
+        elif "stop" in text:
+            return msg, "Stopping"
+        return None, "Command parsing failed"
+```
+
+---
+
+## Step 5: Adding a Voice (TTS)
+
+Communication is two-way. When the robot understands, it should reply. We'll use **gTTS** (Google TTS, online) or **pyttsx3** (Offline).
+
+### Installation
+
+```bash
+pip install gTTS playsound
+```
+
+### TTS Wrapper
+
+```python
+from gtts import gTTS
+import os
+
+def speak(text):
+    tts = gTTS(text=text, lang='en')
+    tts.save("/tmp/response.mp3")
+    os.system("mpg321 /tmp/response.mp3")  # Linux player
+```
+
+**Integrate into Node**:
+Inside `voice_commander`, subscribe to `/voice/feedback` and call `speak(msg.data)`.
+
+---
+
+## Hands-On Exercise
+
+### Task: The "Obedient Robot"
+
+**Goal**: Create a complete voice-control loop for a simulated robot in Gazebo (or Isaac Sim).
+
+1. **Launch** your robot simulation (from Module 2/3).
+2. **Run** the `WakeWordNode` ("Jarvis").
+3. **Run** the `VoiceCommander` node.
+4. **Test Commands**:
+   - "Jarvis... Move forward" -> Robot should move.
+   - "Jarvis... Stop" -> Robot updates.
+   - "Jarvis... Turn around" -> Robot rotates.
+
+**Success Criteria**:
+- System wakes up reliably.
+- Transcribes "Forward", "Back", "Left", "Right", "Stop" correctly.
+- Robot executes movement in simulation.
+- Robot speaks back "Moving forward" etc.
+
+---
+
+## Summary
+
+### 🎯 Key Takeaways
+
+- **Wake Words** (Porcupine) save compute/battery by listening only when needed.
+- **Whisper** provides robust, open-source speech-to-text suitable for robotics.
+- **PyAudio** bridges the gap between hardware functionality and Python logic.
+- **Intent Parsing** is the bridge between natural language (Text) and Robot Action (Twist).
+- **TTS** completes the HRI loop, making the robot feel interactive.
+
+**Next Chapter**: Simple keyword matching is limited. In Chapter 17, we will replace our basic `if-else` parser with a **Large Language Model (LLM)** to understand complex, unstructured commands like "Check the kitchen for obstacles."
+
+---
+
+:::note Chapter Completion
+✅ You've completed Chapter 16: Voice-to-Action with OpenAI Whisper  
+⏱️ Estimated time to complete: 90 minutes  
+📊 Progress: Module 4 - Chapter 1 of 5
+:::
