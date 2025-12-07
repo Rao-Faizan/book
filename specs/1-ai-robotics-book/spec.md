@@ -30,6 +30,7 @@
 ### Session 2025-12-07
 
 - Q: Will students have access to edge compute devices (Jetson) during Module 1, or only in Module 3/4? This impacts motivational context and logistical planning. → A: Module 1 Access.
+- Q: How should student-developed AI agents or ROS 2 nodes handle scenarios where expected sensor data is missing, delayed, or empty (e.g., a camera topic stops publishing, or a sensor returns null values)? → A: Graceful Degradation
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -130,6 +131,7 @@ Students need to manage complex ROS 2 systems with multiple nodes using launch f
 - How are naming conflicts resolved when multiple nodes publish to the same topic? Students should learn about namespaces and topic remapping.
 - What happens when URDF files contain invalid joint configurations (e.g., impossible inertia tensors)? Students should validate models before simulation.
 - How does the system behave when running nodes across multiple machines with network latency? Students should understand DDS discovery and inter-machine communication.
+- How should student-developed AI agents or ROS 2 nodes handle scenarios where expected sensor data is missing, delayed, or empty (e.g., a camera topic stops publishing, or a sensor returns null values)? Students should implement graceful degradation, such as using previous valid data or switching to a safe default behavior.
 
 ## Requirements *(mandatory)*
 
@@ -149,10 +151,11 @@ Students need to manage complex ROS 2 systems with multiple nodes using launch f
 - **FR-010**: Chapter MUST provide visual diagrams of ROS 2 architecture, computational graphs, and communication patterns
 - **FR-011**: Chapter MUST introduce ROS 2 CLI tools (ros2 node, ros2 topic, ros2 service, ros2 action) with basic usage examples
 - **FR-012**: Chapter MUST explain Quality of Service (QoS) policies at a conceptual level (reliability, durability, history, deadline, lifespan, Liveliness)
+- **FR-013**: Chapter MUST introduce the core concepts of ROS 2 node lifecycle management (e.g., unconfigured, inactive, active states, and transitions) at a conceptual level, deferring detailed implementation to later modules.
 
 #### Chapter 2: Building ROS 2 Nodes with Python (rclpy)
 
-- **FR-013**: Chapter MUST teach rclpy library structure and how to import required modules
+- **FR-014**: Chapter MUST teach rclpy library structure and how to import required modules
 - **FR-014**: Chapter MUST demonstrate node initialization using rclpy.init() and node creation with Node class
 - **FR-015**: Chapter MUST show how to create publishers with create_publisher() method, specifying message type and topic name
 - **FR-016**: Chapter MUST show how to create subscribers with create_subscription() method and implement callback functions
