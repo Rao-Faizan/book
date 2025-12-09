@@ -1,0 +1,1186 @@
+---
+id: chapter4
+title: Understanding URDF for Humanoid Robot Description
+sidebar_position: 4
+---
+
+## Understanding URDF for Humanoid Robot Description
+
+This chapter introduces the Unified Robot Description Format (URDF), an XML-based file format used in ROS 2 to describe the physical properties of a robot. You will learn how to define robot kinematics, structure, and appearance for visualization and simulation, with a focus on humanoid robot applications.
+
+### Learning Objectives
+By the end of this chapter, you will be able to:
+- Understand the basic structure and syntax of URDF files.
+- Define `link` and `joint` elements to describe robot segments and their connections.
+- Incorporate visual, collision, and inertial properties into your robot models.
+- Differentiate between various joint types and their applications in humanoid robots.
+- Use `xacro` to create more modular and readable URDF files.
+- Visualize URDF models in RViz2.
+- Perform basic URDF validation and debugging.
+- Understand the importance of coordinate frames and naming conventions (REP-103, REP-105).
+- Get a preview of sensor integration and Gazebo simulation.
+
+---
+
+## 4.1 What is URDF?
+
+**URDF (Unified Robot Description Format)** is an XML-based specification for describing robots in ROS and ROS 2. It provides a standardized way to represent:
+
+- **Robot structure**: The physical links (bodies) and joints (connections) that make up a robot
+- **Kinematic relationships**: How different parts of the robot move relative to each other
+- **Visual appearance**: How the robot looks in visualization tools like RViz2
+- **Collision geometry**: Simplified shapes used for collision detection in simulation
+- **Physical properties**: Mass, inertia, and other properties needed for realistic physics simulation
+
+### Why URDF Matters for Humanoid Robots
+
+Humanoid robots are among the most complex robotic systems, featuring:
+- Multiple degrees of freedom (20-50+ joints)
+- Hierarchical kinematic chains (torso → arms/legs → hands/feet)
+- Diverse joint types (revolute for elbows/knees, continuous for shoulders)
+- Sophisticated balancing and weight distribution requirements
+
+URDF enables you to model these complexities in a format that works seamlessly with ROS 2 tools, simulation environments like Gazebo, and visualization tools like RViz2.
+
+### URDF File Structure
+
+A URDF file is an XML document with a root `<robot>` element containing:
+
+```xml
+<?xml version="1.0"?>
+<robot name="my_humanoid">
+  <!-- Link definitions -->
+  <link name="base_link">
+    <!-- Visual, collision, and inertial properties -->
+  </link>
+  
+  <!-- Joint definitions -->
+  <joint name="torso_to_base" type="fixed">
+    <!-- Parent, child, origin, axis, limits -->
+  </joint>
+  
+  <!-- More links and joints... -->
+</robot>
+```
+
+The basic building blocks are:
+1. **Links**: Rigid body parts of the robot
+2. **Joints**: Connections between links that define motion constraints
+3. **Properties**: Visual geometry, collision shapes, inertial characteristics
+
+---
+
+## 4.2 Link Elements
+
+A **link** represents a rigid body component of your robot. Each link can have three types of properties:
+
+### Visual Properties
+
+Visual properties define how the link appears in visualization tools:
+
+```xml
+<link name="left_forearm">
+  <visual>
+    <origin xyz="0 0 0.15" rpy="0 0 0"/>
+    <geometry>
+      <cylinder radius="0.03" length="0.3"/>
+    </geometry>
+    <material name="blue">
+      <color rgba="0.0 0.0 0.8 1.0"/>
+    </material>
+  </visual>
+</link>
+```
+
+**Key elements**:
+- `<origin>`: Position (`xyz`) and orientation (`rpy` = roll, pitch, yaw in radians) relative to link frame
+- `<geometry>`: Shape of the visual representation
+- `<material>`: Color and appearance (RGBA values: red, green, blue, alpha)
+
+### Collision Properties
+
+Collision properties define simplified geometry for collision detection in physics simulation:
+
+```xml
+<link name="left_forearm">
+  <collision>
+    <origin xyz="0 0 0.15" rpy="0 0 0"/>
+    <geometry>
+      <cylinder radius="0.035" length="0.3"/>
+    </geometry>
+  </collision>
+</link>
+```
+
+:::tip Best Practice
+Collision geometry should be **simpler** than visual geometry for computational efficiency. For example, use a cylinder for collision even if the visual model is a complex mesh.
+:::
+
+### Inertial Properties
+
+Inertial properties define the mass distribution critical for realistic physics simulation:
+
+```xml
+<link name="left_forearm">
+  <inertial>
+    <origin xyz="0 0 0.15" rpy="0 0 0"/>
+    <mass value="1.2"/>
+    <inertia ixx="0.0015" ixy="0.0" ixz="0.0"
+             iyy="0.0015" iyz="0.0" izz="0.0003"/>
+  </inertial>
+</link>
+```
+
+**Key parameters**:
+- `<mass>`: Total mass in kilograms
+- `<inertia>`: 3x3 inertia tensor representing rotational inertia about each axis
+  - Diagonal elements (`ixx`, `iyy`, `izz`): Moments of inertia
+  - Off-diagonal elements (`ixy`, `ixz`, `iyz`): Products of inertia (often 0 for symmetric bodies)
+
+:::warning Important
+Incorrect inertial properties can cause unstable simulation behavior! For simple shapes, use standard formulas. For complex meshes, use CAD software to calculate inertia tensors.
+:::
+
+### Geometry Primitives
+
+URDF supports several primitive shapes:
+
+```xml
+<!-- Box -->
+<geometry>
+  <box size="0.6 0.4 0.2"/>  <!-- length width height -->
+</geometry>
+
+<!-- Cylinder -->
+<geometry>
+  <cylinder radius="0.05" length="0.3"/>
+</geometry>
+
+<!-- Sphere -->
+<geometry>
+  <sphere radius="0.1"/>
+</geometry>
+
+<!-- Mesh (for complex shapes) -->
+<geometry>
+  <mesh filename="package://my_robot_description/meshes/hand.stl" scale="1.0 1.0 1.0"/>
+</geometry>
+```
+
+**Mesh files** (STL, DAE, OBJ) allow high-fidelity visual models but should be used sparingly for collision geometry.
+
+---
+
+## 4.3 Joint Elements
+
+A **joint** connects two links and defines how they can move relative to each other. Every joint has a **parent link** and a **child link**.
+
+### Joint Types
+
+URDF defines several joint types:
+
+| Joint Type | Description | Example Use in Humanoid |
+|------------|-------------|-------------------------|
+| **revolute** | Rotates around an axis with limits | Elbow, knee (hinge joints) |
+| **continuous** | Rotates around an axis without limits | Shoulder rotation, waist twist |
+| **prismatic** | Slides along an axis with limits | Telescoping arm segments |
+| **fixed** | No movement (rigid connection) | Torso to base, sensor mounts |
+| **floating** | 6 DOF (3 translation + 3 rotation) | Rarely used, for free-floating robots |
+| **planar** | 2D movement in a plane | Mobile base constraints |
+
+### Revolute Joint Example
+
+```xml
+<joint name="left_elbow" type="revolute">
+  <parent link="left_upper_arm"/>
+  <child link="left_forearm"/>
+  <origin xyz="0 0 0.3" rpy="0 0 0"/>
+  <axis xyz="0 1 0"/>
+  <limit lower="-2.6" upper="0.0" effort="50.0" velocity="2.0"/>
+  <dynamics damping="0.7" friction="0.0"/>
+</joint>
+```
+
+**Key elements**:
+- `<parent>` and `<child>`: Define the kinematic chain
+- `<origin>`: Transformation from parent link frame to joint frame
+- `<axis>`: Direction of rotation/translation (unit vector)
+- `<limit>`: Motion constraints
+  - `lower`/`upper`: Joint limits in radians (for revolute) or meters (for prismatic)
+  - `effort`: Maximum force/torque the joint can exert
+  - `velocity`: Maximum joint velocity
+- `<dynamics>`: Physical properties
+  - `damping`: Resistance to motion (energy dissipation)
+  - `friction`: Static friction force
+
+### Continuous Joint Example
+
+```xml
+<joint name="left_shoulder_roll" type="continuous">
+  <parent link="torso"/>
+  <child link="left_upper_arm"/>
+  <origin xyz="0 0.2 0.4" rpy="0 0 0"/>
+  <axis xyz="1 0 0"/>
+  <dynamics damping="1.0"/>
+</joint>
+```
+
+Continuous joints have no `<limit>` element since they can rotate indefinitely.
+
+### Fixed Joint Example
+
+```xml
+<joint name="head_to_torso" type="fixed">
+  <parent link="torso"/>
+  <child link="head"/>
+  <origin xyz="0 0 0.5" rpy="0 0 0"/>
+</joint>
+```
+
+Fixed joints create rigid connections and have no `<axis>` or `<limit>`.
+
+---
+
+## 4.4 Building a Simple Multi-Link Robot
+
+Let's build a simple 2-DOF robotic arm step-by-step to understand the URDF workflow.
+
+### Step 1: Define the Base Link
+
+```xml
+<?xml version="1.0"?>
+<robot name="simple_arm">
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <box size="0.1 0.1 0.05"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.5 0.5 0.5 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.1 0.1 0.05"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.5"/>
+      <inertia ixx="0.0002" ixy="0.0" ixz="0.0"
+               iyy="0.0002" iyz="0.0" izz="0.0003"/>
+    </inertial>
+  </link>
+</robot>
+```
+
+### Step 2: Add Upper Arm Link and Joint
+
+```xml
+  <link name="upper_arm">
+    <visual>
+      <origin xyz="0 0 0.15" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.02" length="0.3"/>
+      </geometry>
+      <material name="red">
+        <color rgba="0.8 0.0 0.0 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.15" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.02" length="0.3"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.15" rpy="0 0 0"/>
+      <mass value="0.3"/>
+      <inertia ixx="0.0023" ixy="0.0" ixz="0.0"
+               iyy="0.0023" iyz="0.0" izz="0.00006"/>
+    </inertial>
+  </link>
+
+  <joint name="shoulder" type="revolute">
+    <parent link="base_link"/>
+    <child link="upper_arm"/>
+    <origin xyz="0 0 0.025" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.57" upper="1.57" effort="10.0" velocity="1.0"/>
+  </joint>
+```
+
+### Step 3: Add Forearm Link and Elbow Joint
+
+```xml
+  <link name="forearm">
+    <visual>
+      <origin xyz="0 0 0.125" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.015" length="0.25"/>
+      </geometry>
+      <material name="blue">
+        <color rgba="0.0 0.0 0.8 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.125" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.015" length="0.25"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.125" rpy="0 0 0"/>
+      <mass value="0.2"/>
+      <inertia ixx="0.0011" ixy="0.0" ixz="0.0"
+               iyy="0.0011" iyz="0.0" izz="0.000023"/>
+    </inertial>
+  </link>
+
+  <joint name="elbow" type="revolute">
+    <parent link="upper_arm"/>
+    <child link="forearm"/>
+    <origin xyz="0 0 0.3" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-2.0" upper="0.0" effort="5.0" velocity="1.0"/>
+  </joint>
+```
+
+This creates a simple arm with shoulder and elbow joints that can be visualized and simulated!
+
+---
+
+## 4.5 Humanoid-Specific URDF Modeling
+
+Humanoid robots require careful planning of kinematic chains and joint hierarchies. Let's build a simplified humanoid structure.
+
+### Hierarchical Structure
+
+A typical humanoid has this hierarchy:
+
+```
+base_link (root)
+  └── torso
+      ├── head
+      ├── left_upper_arm
+      │   └── left_forearm
+      │       └── left_hand
+      ├── right_upper_arm
+      │   └── right_forearm
+      │       └── right_hand
+      ├── left_thigh
+      │   └── left_shin
+      │       └── left_foot
+      └── right_thigh
+          └── right_shin
+              └── right_foot
+```
+
+### Kinematic Chains and Joint Hierarchies
+
+**Kinematic chain**: A sequence of links connected by joints, forming a path from root to end-effector.
+
+For a humanoid:
+- **Left arm chain**: `torso → left_upper_arm → left_forearm → left_hand`
+- **Right leg chain**: `torso → right_thigh → right_shin → right_foot`
+
+**Forward Kinematics**: Given joint angles, calculate end-effector position
+**Inverse Kinematics**: Given desired end-effector position, calculate required joint angles
+
+### Example: Humanoid Torso and Head
+
+```xml
+<link name="base_link"/>
+
+<link name="torso">
+  <visual>
+    <geometry>
+      <box size="0.3 0.4 0.6"/>
+    </geometry>
+    <material name="gray"><color rgba="0.7 0.7 0.7 1.0"/></material>
+  </visual>
+  <collision>
+    <geometry>
+      <box size="0.3 0.4 0.6"/>
+    </geometry>
+  </collision>
+  <inertial>
+    <mass value="15.0"/>
+    <inertia ixx="0.52" iyy="0.47" izz="0.22" ixy="0.0" ixz="0.0" iyz="0.0"/>
+  </inertial>
+</link>
+
+<joint name="base_to_torso" type="fixed">
+  <parent link="base_link"/>
+  <child link="torso"/>
+  <origin xyz="0 0 0.9" rpy="0 0 0"/>
+</joint>
+
+<link name="head">
+  <visual>
+    <geometry>
+      <sphere radius="0.12"/>
+    </geometry>
+    <material name="skin"><color rgba="1.0 0.9 0.8 1.0"/></material>
+  </visual>
+  <collision>
+    <geometry>
+      <sphere radius="0.12"/>
+    </geometry>
+  </collision>
+  <inertial>
+    <mass value="2.0"/>
+    <inertia ixx="0.0058" iyy="0.0058" izz="0.0058" ixy="0.0" ixz="0.0" iyz="0.0"/>
+  </inertial>
+</link>
+
+<joint name="neck" type="revolute">
+  <parent link="torso"/>
+  <child link="head"/>
+  <origin xyz="0 0 0.35" rpy="0 0 0"/>
+  <axis xyz="0 0 1"/>
+  <limit lower="-1.57" upper="1.57" effort="5.0" velocity="1.0"/>
+</joint>
+```
+
+### Example: Left Arm
+
+```xml
+<link name="left_upper_arm">
+  <visual>
+    <origin xyz="0 0 -0.15" rpy="0 0 0"/>
+    <geometry>
+      <cylinder radius="0.04" length="0.3"/>
+    </geometry>
+    <material name="gray"><color rgba="0.6 0.6 0.6 1.0"/></material>
+  </visual>
+  <inertial>
+    <origin xyz="0 0 -0.15" rpy="0 0 0"/>
+    <mass value="1.5"/>
+    <inertia ixx="0.0115" iyy="0.0115" izz="0.0012" ixy="0.0" ixz="0.0" iyz="0.0"/>
+  </inertial>
+</link>
+
+<joint name="left_shoulder" type="continuous">
+  <parent link="torso"/>
+  <child link="left_upper_arm"/>
+  <origin xyz="0 0.22 0.25" rpy="0 0 0"/>
+  <axis xyz="1 0 0"/>
+  <dynamics damping="1.0"/>
+</joint>
+
+<link name="left_forearm">
+  <visual>
+    <origin xyz="0 0 -0.125" rpy="0 0 0"/>
+    <geometry>
+      <cylinder radius="0.03" length="0.25"/>
+    </geometry>
+    <material name="gray"><color rgba="0.6 0.6 0.6 1.0"/></material>
+  </visual>
+  <inertial>
+    <origin xyz="0 0 -0.125" rpy="0 0 0"/>
+    <mass value="0.8"/>
+    <inertia ixx="0.0042" iyy="0.0042" izz="0.00036" ixy="0.0" ixz="0.0" iyz="0.0"/>
+  </inertial>
+</link>
+
+<joint name="left_elbow" type="revolute">
+  <parent link="left_upper_arm"/>
+  <child link="left_forearm"/>
+  <origin xyz="0 0 -0.3" rpy="0 0 0"/>
+  <axis xyz="0 1 0"/>
+  <limit lower="-2.6" upper="0.0" effort="20.0" velocity="2.0"/>
+</joint>
+
+<link name="left_hand">
+  <visual>
+    <geometry>
+      <box size="0.08 0.12 0.03"/>
+    </geometry>
+    <material name="skin"><color rgba="1.0 0.9 0.8 1.0"/></material>
+  </visual>
+  <inertial>
+    <mass value="0.3"/>
+    <inertia ixx="0.00016" iyy="0.00010" izz="0.00020" ixy="0.0" ixz="0.0" iyz="0.0"/>
+  </inertial>
+</link>
+
+<joint name="left_wrist" type="fixed">
+  <parent link="left_forearm"/>
+  <child link="left_hand"/>
+  <origin xyz="0 0 -0.25" rpy="0 0 0"/>
+</joint>
+```
+
+:::tip Exercise
+Create the right arm by mirroring the left arm structure, changing `left_` to `right_` and adjusting the y-coordinate of the shoulder origin from `0.22` to `-0.22`.
+:::
+
+---
+
+## 4.6 Using Xacro for Modular URDF
+
+**Xacro** (XML Macros) extends URDF with programming features: variables, macros, math expressions, and file inclusion. This makes URDF files more maintainable and reusable.
+
+### Basic Xacro Features
+
+```xml
+<?xml version="1.0"?>
+<robot name="my_robot" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  
+  <!-- Define properties (constants) -->
+  <xacro:property name="arm_radius" value="0.04"/>
+  <xacro:property name="arm_length" value="0.3"/>
+  <xacro:property name="arm_mass" value="1.5"/>
+  
+  <!-- Use properties with ${} syntax -->
+  <link name="upper_arm">
+    <visual>
+      <geometry>
+        <cylinder radius="${arm_radius}" length="${arm_length}"/>
+      </geometry>
+    </visual>
+    <inertial>
+      <mass value="${arm_mass}"/>
+    </inertial>
+  </link>
+  
+  <!-- Math expressions -->
+  <xacro:property name="half_length" value="${arm_length / 2.0}"/>
+  
+</robot>
+```
+
+### Xacro Macros for Reusable Components
+
+```xml
+<!-- Define an arm macro -->
+<xacro:macro name="arm" params="prefix reflect">
+  <link name="${prefix}_upper_arm">
+    <visual>
+      <origin xyz="0 0 -0.15" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.04" length="0.3"/>
+      </geometry>
+      <material name="gray"><color rgba="0.6 0.6 0.6 1.0"/></material>
+    </visual>
+    <inertial>
+      <origin xyz="0 0 -0.15" rpy="0 0 0"/>
+      <mass value="1.5"/>
+      <inertia ixx="0.0115" iyy="0.0115" izz="0.0012" ixy="0.0" ixz="0.0" iyz="0.0"/>
+    </inertial>
+  </link>
+
+  <joint name="${prefix}_shoulder" type="continuous">
+    <parent link="torso"/>
+    <child link="${prefix}_upper_arm"/>
+    <origin xyz="0 ${reflect * 0.22} 0.25" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="1.0"/>
+  </joint>
+
+  <link name="${prefix}_forearm">
+    <visual>
+      <origin xyz="0 0 -0.125" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.03" length="0.25"/>
+      </geometry>
+      <material name="gray"><color rgba="0.6 0.6 0.6 1.0"/></material>
+    </visual>
+    <inertial>
+      <origin xyz="0 0 -0.125" rpy="0 0 0"/>
+      <mass value="0.8"/>
+      <inertia ixx="0.0042" iyy="0.0042" izz="0.00036" ixy="0.0" ixz="0.0" iyz="0.0"/>
+    </inertial>
+  </link>
+
+  <joint name="${prefix}_elbow" type="revolute">
+    <parent link="${prefix}_upper_arm"/>
+    <child link="${prefix}_forearm"/>
+    <origin xyz="0 0 -0.3" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-2.6" upper="0.0" effort="20.0" velocity="2.0"/>
+  </joint>
+</xacro:macro>
+
+<!-- Instantiate the macro for both arms -->
+<xacro:arm prefix="left" reflect="1"/>
+<xacro:arm prefix="right" reflect="-1"/>
+```
+
+This creates both arms with a single macro definition! The `reflect` parameter mirrors the y-coordinate.
+
+### File Inclusion
+
+Split large robot descriptions across multiple files:
+
+```xml
+<!-- main_robot.urdf.xacro -->
+<robot name="humanoid" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:include filename="$(find my_robot_description)/urdf/torso.xacro"/>
+  <xacro:include filename="$(find my_robot_description)/urdf/arms.xacro"/>
+  <xacro:include filename="$(find my_robot_description)/urdf/legs.xacro"/>
+  
+  <!-- Instantiate components -->
+  <xacro:torso/>
+  <xacro:arm prefix="left" reflect="1"/>
+  <xacro:arm prefix="right" reflect="-1"/>
+  <xacro:leg prefix="left" reflect="1"/>
+  <xacro:leg prefix="right" reflect="-1"/>
+</robot>
+```
+
+### Converting Xacro to URDF
+
+Xacro files must be processed into URDF before use:
+
+```bash
+xacro robot.urdf.xacro > robot.urdf
+# Or use the ROS 2 command:
+ros2 run xacro xacro robot.urdf.xacro -o robot.urdf
+```
+
+---
+
+## 4.7 URDF Validation and Debugging
+
+### Using check_urdf
+
+The `check_urdf` tool validates URDF syntax and structure:
+
+```bash
+check_urdf my_robot.urdf
+```
+
+**Example output** for a valid URDF:
+```
+robot name is: my_humanoid
+---------- Successfully Parsed XML ---------------
+root Link: base_link has 1 child(ren)
+    child(1):  torso
+        child(1):  head
+        child(2):  left_upper_arm
+            child(1):  left_forearm
+                child(1):  left_hand
+        child(3):  right_upper_arm
+            child(1):  right_forearm
+                child(1):  right_hand
+```
+
+### Common URDF Errors
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| "Failed to parse" | XML syntax error | Check for unclosed tags, missing quotes |
+| "link [] has no inertia" | Missing `<inertial>` block | Add mass and inertia, even if placeholder values |
+| "joint [] is not connected to the root" | Disconnected kinematic tree | Ensure all links trace back to a root link |
+| "negative joint limit" | `lower > upper` in joint limit | Swap or correct limit values |
+| "inertia matrix not positive definite" | Impossible inertia values | Use physically realistic inertia tensors |
+
+### Debugging Tips
+
+1. **Start simple**: Build and validate incrementally (1-2 links at a time)
+2. **Use visualization**: Load in RViz2 early to spot geometric errors
+3. **Check coordinate frames**: Use RViz2's TF display to verify frame orientations
+4. **Validate math**: Use online inertia calculators for standard shapes
+5. **Use xacro wisely**: Test macros with simple cases before scaling up
+
+---
+
+## 4.8 Visualization in RViz2
+
+RViz2 is ROS 2's 3D visualization tool. To visualize a URDF:
+
+### Step 1: Create a Launch File
+
+Create `display_robot.launch.py`:
+
+```python
+from launch import LaunchDescription
+from launch_ros.actions import Node
+from launch.substitutions import Command
+import os
+from ament_index_python.packages import get_package_share_directory
+
+def generate_launch_description():
+    # Get URDF file path
+    urdf_file = os.path.join(
+        get_package_share_directory('my_robot_description'),
+        'urdf',
+        'my_humanoid.urdf'
+    )
+    
+    # Read URDF content
+    with open(urdf_file, 'r') as file:
+        robot_desc = file.read()
+    
+    return LaunchDescription([
+        # Robot State Publisher: publishes TF transforms
+        Node(
+            package='robot_state_publisher',
+            executable='robot_state_publisher',
+            name='robot_state_publisher',
+            output='screen',
+            parameters=[{'robot_description': robot_desc}]
+        ),
+        
+        # Joint State Publisher GUI: control joint angles interactively
+        Node(
+            package='joint_state_publisher_gui',
+            executable='joint_state_publisher_gui',
+            name='joint_state_publisher_gui',
+            output='screen'
+        ),
+        
+        # RViz2
+        Node(
+            package='rviz2',
+            executable='rviz2',
+            name='rviz2',
+            output='screen'
+        )
+    ])
+```
+
+### Step 2: Launch the Visualization
+
+```bash
+ros2 launch my_robot_description display_robot.launch.py
+```
+
+This opens:
+1. **RViz2** window for 3D visualization
+2. **Joint State Publisher GUI** with sliders for each joint
+
+### Step 3: Configure RViz2
+
+1. Set **Fixed Frame** to `base_link` (or your root link)
+2. Add **RobotModel** display:
+   - Click "Add" → "RobotModel"
+   - Topic should auto-populate as `/robot_description`
+3. Add **TF** display to see coordinate frames
+4. Use joint sliders to move the robot!
+
+:::tip Pro Tip
+Save your RViz2 configuration (File → Save Config) and load it automatically in your launch file using the `rviz_config` parameter.
+:::
+
+---
+
+## 4.9 Reference Frames and Naming Conventions
+
+### REP-103: Standard Units and Coordinate Conventions
+
+[REP-103](https://www.ros.org/reps/rep-0103.html) defines ROS coordinate frame conventions:
+
+**Coordinate Frame Orientation** (Right-Hand Rule):
+- **X-axis**: Forward
+- **Y-axis**: Left
+- **Z-axis**: Up
+
+**Units**:
+- Length: meters (m)
+- Angle: radians (rad)
+- Mass: kilograms (kg)
+- Time: seconds (s)
+
+**Rotation Convention**: Intrinsic rotations in RPY (Roll-Pitch-Yaw) order
+- **Roll**: Rotation around X-axis
+- **Pitch**: Rotation around Y-axis
+- **Yaw**: Rotation around Z-axis
+
+### REP-105: Coordinate Frames for Mobile Platforms
+
+[REP-105](https://www.ros.org/reps/rep-0105.html) defines standard frame names:
+
+| Frame | Purpose | Example for Humanoid |
+|-------|---------|---------------------|
+| `base_link` | Robot's root reference frame | Center of torso base |
+| `base_footprint` | Projection of base onto ground plane | Point on floor between feet |
+| `odom` | Odometry (drift over time) | World-fixed frame for local navigation |
+| `map` | Global reference frame | Building or world map frame |
+
+### Naming Conventions for Humanoid Robots
+
+Follow these conventions for clarity and interoperability:
+
+**Link Names**:
+- Use lowercase with underscores: `left_upper_arm`, not `LeftUpperArm`
+- Include side prefixes: `left_*`, `right_*`
+- Use anatomical terms: `torso`, `thigh`, `shin`, `foot`, `hand`
+
+**Joint Names**:
+- Describe the motion or location: `left_elbow`, `right_knee`, `neck`
+- Use consistent naming: if arm joints are `left_shoulder`, `left_elbow`, use `left_wrist` (not `left_hand_joint`)
+
+**Frame Orientations**:
+- All frames use REP-103 orientation (X forward, Y left, Z up)
+- Joint axes follow right-hand rule
+
+**Example Humanoid Frame Structure**:
+```
+base_link (root)
+├── torso
+│   ├── head
+│   ├── left_shoulder → left_upper_arm → left_forearm → left_hand
+│   ├── right_shoulder → right_upper_arm → right_forearm → right_hand
+│   ├── left_hip → left_thigh → left_shin → left_foot
+│   └── right_hip → right_thigh → right_shin → right_foot
+```
+
+---
+
+## 4.10 Sensor Integration in URDF
+
+URDF can include sensor definitions for simulation. Sensors are typically modeled as:
+1. A link representing the sensor's physical body
+2. A fixed joint attaching it to the robot
+3. Gazebo plugin tags for simulation behavior
+
+### Camera Sensor Example
+
+```xml
+<link name="camera_link">
+  <visual>
+    <geometry>
+      <box size="0.02 0.05 0.02"/>
+    </geometry>
+    <material name="black"><color rgba="0.0 0.0 0.0 1.0"/></material>
+  </visual>
+  <inertial>
+    <mass value="0.1"/>
+    <inertia ixx="0.00003" iyy="0.00001" izz="0.00003" ixy="0.0" ixz="0.0" iyz="0.0"/>
+  </inertial>
+</link>
+
+<joint name="camera_joint" type="fixed">
+  <parent link="head"/>
+  <child link="camera_link"/>
+  <origin xyz="0.08 0 0" rpy="0 0 0"/>
+</joint>
+
+<!-- Gazebo plugin for camera -->
+<gazebo reference="camera_link">
+  <sensor type="camera" name="head_camera">
+    <update_rate>30.0</update_rate>
+    <camera>
+      <horizontal_fov>1.3962634</horizontal_fov>
+      <image>
+        <width>640</width>
+        <height>480</height>
+        <format>R8G8B8</format>
+      </image>
+      <clip>
+        <near>0.02</near>
+        <far>10.0</far>
+      </clip>
+    </camera>
+    <plugin name="camera_controller" filename="libgazebo_ros_camera.so">
+      <ros>
+        <namespace>/camera</namespace>
+        <remapping>image_raw:=rgb/image_raw</remapping>
+        <remapping>camera_info:=rgb/camera_info</remapping>
+      </ros>
+      <camera_name>head_camera</camera_name>
+      <frame_name>camera_link</frame_name>
+    </plugin>
+  </sensor>
+</gazebo>
+```
+
+### Lidar Sensor Example
+
+```xml
+<link name="lidar_link">
+  <visual>
+    <geometry>
+      <cylinder radius="0.05" length="0.07"/>
+    </geometry>
+    <material name="black"><color rgba="0.1 0.1 0.1 1.0"/></material>
+  </visual>
+  <inertial>
+    <mass value="0.3"/>
+    <inertia ixx="0.00018" iyy="0.00018" izz="0.0001875" ixy="0.0" ixz="0.0" iyz="0.0"/>
+  </inertial>
+</link>
+
+<joint name="lidar_joint" type="fixed">
+  <parent link="torso"/>
+  <child link="lidar_link"/>
+  <origin xyz="0.15 0 0.3" rpy="0 0 0"/>
+</joint>
+
+<gazebo reference="lidar_link">
+  <sensor type="ray" name="lidar">
+    <pose>0 0 0 0 0 0</pose>
+    <visualize>true</visualize>
+    <update_rate>10</update_rate>
+    <ray>
+      <scan>
+        <horizontal>
+          <samples>360</samples>
+          <resolution>1</resolution>
+          <min_angle>-3.14159</min_angle>
+          <max_angle>3.14159</max_angle>
+        </horizontal>
+      </scan>
+      <range>
+        <min>0.2</min>
+        <max>10.0</max>
+        <resolution>0.01</resolution>
+      </range>
+    </ray>
+    <plugin name="lidar_controller" filename="libgazebo_ros_ray_sensor.so">
+      <ros>
+        <namespace>/lidar</namespace>
+        <remapping>~/out:=scan</remapping>
+      </ros>
+      <output_type>sensor_msgs/LaserScan</output_type>
+      <frame_name>lidar_link</frame_name>
+    </plugin>
+  </sensor>
+</gazebo>
+```
+
+### IMU Sensor Example
+
+```xml
+<link name="imu_link">
+  <visual>
+    <geometry>
+      <box size="0.01 0.01 0.005"/>
+    </geometry>
+  </visual>
+  <inertial>
+    <mass value="0.01"/>
+    <inertia ixx="0.000001" iyy="0.000001" izz="0.000001" ixy="0.0" ixz="0.0" iyz="0.0"/>
+  </inertial>
+</link>
+
+<joint name="imu_joint" type="fixed">
+  <parent link="torso"/>
+  <child link="imu_link"/>
+  <origin xyz="0 0 0" rpy="0 0 0"/>
+</joint>
+
+<gazebo reference="imu_link">
+  <sensor name="imu_sensor" type="imu">
+    <always_on>true</always_on>
+    <update_rate>100</update_rate>
+    <imu>
+      <angular_velocity>
+        <x><noise type="gaussian"><mean>0.0</mean><stddev>0.0002</stddev></noise></x>
+        <y><noise type="gaussian"><mean>0.0</mean><stddev>0.0002</stddev></noise></y>
+        <z><noise type="gaussian"><mean>0.0</mean><stddev>0.0002</stddev></noise></z>
+      </angular_velocity>
+      <linear_acceleration>
+        <x><noise type="gaussian"><mean>0.0</mean><stddev>0.017</stddev></noise></x>
+        <y><noise type="gaussian"><mean>0.0</mean><stddev>0.017</stddev></noise></y>
+        <z><noise type="gaussian"><mean>0.0</mean><stddev>0.017</stddev></noise></z>
+      </linear_acceleration>
+    </imu>
+    <plugin name="imu_plugin" filename="libgazebo_ros_imu_sensor.so">
+      <ros>
+        <namespace>/imu</namespace>
+        <remapping>~/out:=data</remapping>
+      </ros>
+      <frame_name>imu_link</frame_name>
+    </plugin>
+  </sensor>
+</gazebo>
+```
+
+:::note Module 2 Preview
+Gazebo plugins are covered in depth in Module 2 (Digital Twin). For now, understand that sensors require both URDF link definitions and Gazebo-specific plugin configurations.
+:::
+
+---
+
+## 4.11 Gazebo Simulation Preview (Instructor-Led Demo)
+
+:::info Instructor-Led Demo (10-15 minutes)
+This section is demonstrated by the instructor. Students do NOT need to install or use Gazebo in Module 1. This preview contextualizes URDF learning and previews Module 2 content.
+:::
+
+### What is Gazebo?
+
+**Gazebo** is a physics-based 3D simulator for ROS 2 robots. It provides:
+- Realistic physics simulation (gravity, collision, friction)
+- Sensor simulation (camera, lidar, IMU with noise models)
+- Actuator modeling (motors, servos with dynamics)
+- Environment modeling (terrains, obstacles, lighting)
+
+### Demo Setup (Instructor Only)
+
+**Prerequisites**:
+- Gazebo 11 (for ROS 2 Humble)
+- `ros-humble-gazebo-ros-pkgs`
+
+**Load URDF in Gazebo**:
+```bash
+# Terminal 1: Launch Gazebo with empty world
+gazebo --verbose
+
+# Terminal 2: Spawn robot from URDF
+ros2 run gazebo_ros spawn_entity.py -entity my_humanoid \
+  -file /path/to/my_humanoid.urdf
+```
+
+### What Students Should Observe
+
+1. **Physics Simulation**: Robot falls due to gravity, joints move with realistic dynamics
+2. **Visual Rendering**: URDF visual geometry appears in 3D environment
+3. **Collision Detection**: Robot interactions with ground plane and obstacles
+4. **Sensor Data**: Camera images, lidar scans published to ROS 2 topics (if sensors defined)
+
+### Key Takeaways
+
+- URDF defines robot structure for BOTH visualization (RViz2) AND simulation (Gazebo)
+- Accurate inertial properties are critical for realistic simulation
+- Gazebo plugins extend URDF with sensor and actuator behavior
+- Module 2 will cover Gazebo in depth for full robot simulation workflows
+
+### Instructor Prep Guide
+
+**Before Demo**:
+1. Test URDF loading in Gazebo on instructor machine
+2. Prepare simple world file with ground plane
+3. Have RViz2 open alongside Gazebo to compare visualization vs. simulation
+4. Prepare example commands in script for smooth demo flow
+
+**During Demo**:
+1. Show URDF file structure (5 min)
+2. Launch Gazebo, spawn robot (3 min)
+3. Interact with robot: apply forces, move joints (3 min)
+4. Show sensor outputs in RViz2 (e.g., camera feed) (2 min)
+5. Q&A and transition to Module 2 preview (2 min)
+
+---
+
+## 4.12 Hands-On Exercise: Build Your Humanoid URDF
+
+### Exercise Overview
+
+Create a simplified humanoid URDF with:
+- Torso, head, two arms, two legs
+- At least 10 joints (neck, shoulders, elbows, hips, knees)
+- Proper inertial properties
+- Xacro macros for arms and legs
+- Visualization in RViz2
+
+### Skeleton Code
+
+**File**: `my_humanoid.urdf.xacro`
+
+```xml
+<?xml version="1.0"?>
+<robot name="my_humanoid" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- TODO: Define properties for link dimensions -->
+  <xacro:property name="torso_width" value="0.4"/>
+  <!-- Add more properties here -->
+
+  <!-- Base link -->
+  <link name="base_link"/>
+
+  <!-- TODO: Define torso link with visual, collision, and inertial -->
+  <link name="torso">
+    <!-- Your code here -->
+  </link>
+
+  <joint name="base_to_torso" type="fixed">
+    <parent link="base_link"/>
+    <child link="torso"/>
+    <origin xyz="0 0 0.9" rpy="0 0 0"/>
+  </joint>
+
+  <!-- TODO: Define head link and neck joint -->
+
+  <!-- TODO: Create xacro macro for arm -->
+  <xacro:macro name="arm" params="prefix reflect">
+    <!-- Your code here -->
+  </xacro:macro>
+
+  <!-- TODO: Instantiate arms -->
+  <xacro:arm prefix="left" reflect="1"/>
+  <xacro:arm prefix="right" reflect="-1"/>
+
+  <!-- TODO: Create xacro macro for leg -->
+  <xacro:macro name="leg" params="prefix reflect">
+    <!-- Your code here: thigh, shin, foot links and joints -->
+  </xacro:macro>
+
+  <!-- TODO: Instantiate legs -->
+  <xacro:leg prefix="left" reflect="1"/>
+  <xacro:leg prefix="right" reflect="-1"/>
+
+</robot>
+```
+
+### Step-by-Step Instructions
+
+1. **Fill in properties**: Define dimensions for all body parts
+2. **Create torso link**: Box geometry, mass ~15kg, appropriate inertia
+3. **Create head link**: Sphere geometry, mass ~2kg, connected via revolute neck joint
+4. **Define arm macro**: Upper arm + forearm + hand with shoulder, elbow, wrist joints
+5. **Define leg macro**: Thigh + shin + foot with hip, knee, ankle joints
+6. **Validate URDF**: Run `check_urdf` after conversion from xacro
+7. **Visualize**: Use the launch file from section 4.8 to view in RViz2
+
+### Success Criteria
+
+- [ ] URDF passes `check_urdf` without errors
+- [ ] Robot visualizes correctly in RViz2
+- [ ] All joints move smoothly in Joint State Publisher GUI
+- [ ] Kinematic chains are correct (check TF tree)
+- [ ] Inertial properties are physically reasonable
+
+### Bonus Challenges
+
+1. Add sensors: camera on head, IMU in torso
+2. Create separate xacro files for each body component
+3. Add color materials for different body parts
+4. Calculate exact inertia tensors using formulas for cylinders/boxes
+
+---
+
+## Chapter Summary
+
+In this chapter, you learned:
+
+✅ **URDF fundamentals**: XML-based format for robot description  
+✅ **Link elements**: Visual, collision, and inertial properties  
+✅ **Joint elements**: Types (revolute, continuous, prismatic, fixed) and properties  
+✅ **Geometry**: Primitive shapes vs. mesh files  
+✅ **Humanoid modeling**: Kinematic chains, joint hierarchies, forward/inverse kinematics  
+✅ **Xacro**: Properties, macros, math expressions for modular URDF  
+✅ **Validation**: Using `check_urdf` and debugging techniques  
+✅ **Visualization**: RViz2 workflow with `robot_state_publisher` and `joint_state_publisher_gui`  
+✅ **Standards**: REP-103 and REP-105 conventions for frames and naming  
+✅ **Sensors**: Camera, lidar, IMU integration with Gazebo plugins  
+✅ **Simulation preview**: Gazebo for physics-based robot simulation
+
+### Key Takeaways
+
+1. **URDF is the foundation** for robot modeling in ROS 2 (visualization, simulation, control)
+2. **Start simple, iterate**: Build incrementally and validate frequently
+3. **Xacro is essential** for real robots to manage complexity and avoid repetition
+4. **Inertial properties matter**: Poor inertia values cause simulation instability
+5. **Follow conventions**: REP-103/105 ensure interoperability with ROS 2 ecosystem
+
+### Next Steps
+
+- **Module 1, Chapter 5**: Learn launch files and package management to organize URDF files and nodes
+- **Module 2**: Deep dive into Gazebo simulation, world building, physics tuning
+- **Hands-on project**: Complete the humanoid URDF exercise and prepare for simulation
+
+### Additional Resources
+
+- [URDF Official Documentation](http://wiki.ros.org/urdf)
+- [Xacro Documentation](http://wiki.ros.org/xacro)
+- [REP-103: Standard Units of Measure](https://www.ros.org/reps/rep-0103.html)
+- [REP-105: Coordinate Frames](https://www.ros.org/reps/rep-0105.html)
+- [Gazebo Tutorials](http://gazebosim.org/tutorials)
+
+---
+
+**Continue to Chapter 5: Launch Files and Package Management →**

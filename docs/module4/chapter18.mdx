@@ -1,0 +1,212 @@
+---
+title: "Chapter 18: Multi-Modal Robot Interaction"
+description: "Combine Hearing (Whisper), Seeing (VLMs), and Reasoning (LLMs) to create robots that understand gestures and spatial commands"
+sidebar_position: 3
+---
+
+# Chapter 18: Multi-Modal Robot Interaction
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+
+- **Understand** the architecture of Vision-Language Models (VLMs) like CLIP and LLaVA
+- **Implement** Gesture Recognition using Google MediaPipe
+- **Fuse** modalities: Combine "Look at *that*" (Voice) with a Pointing Gesture (Vision)
+- **Identify** objects using Open-Vocabulary detection (e.g., "Find the red toy")
+- **Build** a Multi-Modal ROS 2 Node that grounds language in the physical world
+- **Create** a natural dialog system where the robot asks clarifying questions
+
+**Prerequisites**: Chapter 16 (Voice), Chapter 17 (LLMs), Camera connected  
+**Estimated Time**: 100 minutes
+
+---
+
+## The Power of "Look at That"
+
+In Chapter 17, our robot was "blind" to the semantic world. It could navigate to a *kitchen*, but couldn't answer: *"Is the stove on?"* or *"Hand me the red cup."*
+
+**Multi-Modal AI** bridges this gap by connecting:
+1. **Text** (Language)
+2. **Images** (Vision)
+3. **Proprioception** (Pointing/Gestures)
+
+---
+
+## Part 1: Vision-Language Models (VLMs)
+
+Traditional object detectors (YOLO) are limited to 80 COCO classes.
+**VLMs** (like **CLIP**, **LLaVA**) can recognize *anything* you can describe in text.
+
+### Zero-Shot Detection with CLIP
+
+**CLIP** (Contrastive Language-Image Pretraining) tells you how well an image matches a text description.
+
+**Installation**:
+
+```bash
+pip install ftfy regex tqdm git+https://github.com/openai/CLIP.git
+```
+
+**Python Usage**:
+
+```python
+import clip
+import torch
+from PIL import Image
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model, preprocess = clip.load("ViT-B/32", device=device)
+
+def classify_object(image_path, candidate_labels):
+    image = preprocess(Image.open(image_path)).unsqueeze(0).to(device)
+    text = clip.tokenize(candidate_labels).to(device)
+
+    with torch.no_grad():
+        logits_per_image, _ = model(image, text)
+        probs = logits_per_image.softmax(dim=-1).cpu().numpy()
+
+    # Returns list of probabilities matching labels
+    return probs[0]
+```
+
+**Robot Use Case**:
+User: "Find the **spicy sauce**."
+Robot: Scans shelf, crops objects, runs CLIP against ["spicy sauce", "ketchup", "mustard"]. Highest score wins.
+
+---
+
+## Part 2: Gesture Recognition
+
+Pointing is a powerful deictic gesture. *"Go there"* means nothing without the gesture.
+
+We use **Google MediaPipe** for real-time hand tracking.
+
+**Installation**:
+```bash
+pip install mediapipe
+```
+
+**Pointing Direction Node**:
+
+```python
+import mediapipe as mp
+import cv2
+import numpy as np
+
+# Initialize MediaPipe Hands
+mp_hands = mp.solutions.hands
+hands = mp_hands.Hands(max_num_hands=1)
+
+def get_pointing_vector(image):
+    results = hands.process(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+    
+    if results.multi_hand_landmarks:
+        lm = results.multi_hand_landmarks[0]
+        
+        # Index Finger: Base (5) to Tip (8)
+        base = np.array([lm.landmark[5].x, lm.landmark[5].y])
+        tip = np.array([lm.landmark[8].x, lm.landmark[8].y])
+        
+        # 2D Vector
+        vector = tip - base
+        return vector # (dx, dy)
+        
+    return None
+```
+
+To map 2D pointing to 3D world coordinates, you need **Depth** (RealSense) and intrinsic calibration. Conceptually, you cast a ray from the camera center through the finger vector until it hits the floor.
+
+---
+
+## Part 3: The Fusion Engine
+
+We need a node that listens to **Voice** and watches **Vision** simultaneously.
+
+### Time Synchronization
+
+If I say "That one" at `t=10.5`s, I was probably pointing at `t=10.0-11.0`s.
+Exact timestamp matching in ROS 2 (`message_filters.ApproximateTimeSynchronizer`) is critical.
+
+### The Fusion Logic
+
+**Command**: "Pick up [DEICTIC_REF]" (e.g., "this", "that", "it")
+**Trigger**: Gesture Detection.
+
+```python
+class MultiModalFusion(Node):
+    def __init__(self):
+        # ... setup subscribers ...
+        self.last_voice_cmd = None
+        self.last_gesture_vec = None
+        
+    def fuse(self):
+        if "that" in self.last_voice_cmd:
+            if self.last_gesture_vec:
+                target_loc = self.project_ray(self.last_gesture_vec)
+                return f"navigate({target_loc})"
+            else:
+                return "speak('I didn't see where you pointed.')"
+```
+
+---
+
+## Part 4: Open-Vocabulary Object Detection (YOLO-World)
+
+Newer models like **YOLO-World** allow you to define classes at runtime.
+
+**Prompt**: "Find the **safety vest**."
+**YOLO-World**: Detects person, but specifically highlights the vest.
+
+**ROS 2 Integration**:
+Use `isaac_ros_yolov8` (Module 3) but swap the model weights for a fine-tuned open-vocabulary model or standard YOLO if classes match.
+
+---
+
+## Hands-On Exercise
+
+### Task: "Fetch the [Color] Block"
+
+**Scenario**: Table with Red, Green, and Blue blocks.
+**Command**: "Pick up the **Green** block." (Uses VLM/CLIP).
+**Command**: "Pick up **that** block." (Uses Gesture).
+
+1. **Setup**:
+   - RGB Camera looking at table.
+   - Microphone.
+2. **Execution**:
+   - **Voice**: Whisper transcribes command.
+   - **LLM**: Extracts `target_object="green block"`.
+   - **Vision**:
+     - Object Detector finds 3 blocks.
+     - Crop images of 3 blocks.
+     - CLIP compares crops to "green block".
+     - Highest confidence is selected.
+   - **Action**: Arm moves to pick it up.
+
+**Success Criteria**:
+- Robot correctly disambiguates objects based on color/description.
+- Robot correctly identifies "that" based on pointing (Left vs Right).
+
+---
+
+## Summary
+
+### 🎯 Key Takeaways
+
+- **Multi-Modal AI** allows interacting with robots like humans interact with each other.
+- **VLMs (CLIP)** act as a universal translator between Text and Pixels.
+- **MediaPipe** provides low-cost, high-speed gesture recognition.
+- **Deictic Resolution** ("this", "there") requires fusing timestamped voice and vision data.
+- **Closed-Loop Interaction**: The robot should ask "Did you mean the red one?" if unsure.
+
+**Next Chapter**: We have all the pieces: ROS 2 (Body), Simulation (World), Isaac/Nav2 (Skills), Voice (Ears), LLM (Brain), and VLM (Eyes).
+In **Chapter 19**, we combine EVERYTHING into the **Capstone Project: The Autonomous Humanoid**.
+
+---
+
+:::note Chapter Completion
+✅ You've completed Chapter 18: Multi-Modal Robot Interaction  
+⏱️ Estimated time to complete: 100 minutes  
+📊 Progress: Module 4 - Chapter 3 of 5
+:::

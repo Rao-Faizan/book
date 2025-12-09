@@ -1,0 +1,186 @@
+---
+title: "Chapter 19: Capstone Project - Autonomous Humanoid"
+description: "The final integration challenge: Build a complete autonomous humanoid system that understands voice, sees the world, plans actions, and executes tasks using ROS 2, Isaac Sim, and AI"
+sidebar_position: 4
+---
+
+# Chapter 19: Capstone Project: Autonomous Humanoid
+
+## The Ultimate Challenge
+
+Congratulations on reaching the summit! 🏔️
+Over the last 18 chapters, you have built the nervous system (ROS 2), the body (URDF), the brain (LLMs), and the senses (Vision/Voice) of a robot.
+
+Now, you must fuse them all into a single, cohesive entity: **The Autonomous Humanoid Strategy**.
+
+**Your Machine**: "Clean the Room."
+**Your Robot**: Must wake up, listen, understand "Clean", look for trash, navigate to it, pick it up, and place it in a bin.
+
+---
+
+## 1. Project Requirements
+
+### Functional Requirements
+1. **Voice Activation**: Robot wakes on "Hey Robot" (or similar).
+2. **Cognitive Planning**: Converts vague commands ("It's messy") into specific plans.
+3. **Visual Perception**: Identifies objects (Cups, Trash, Toys) using Vision.
+4. **Navigation**: Moves safely between rooms without collisions (Nav2).
+5. **Manipulation**: Grasps objects and places them (MoveIt/Isaac).
+6. **Feedback**: Speaks to the user about its status.
+
+### The "Clean Room" Benchmark
+The robot is placed in an unknown room with 3 objects on the floor:
+- 🔴 **Red Soda Can** (Trash)
+- 🧸 **Toy Bear** (Keep)
+- 🍌 **Banana Peel** (Trash)
+
+**Goal**: Find both trash items and put them in the **Blue Bin**. Leave the bear alone.
+
+---
+
+## 2. System Architecture Blueprint
+
+You are building a **Cognitive Robotic Architecture**.
+
+```mermaid
+graph TD
+    User((User)) -->|Voice| A[Audio Capture]
+    A -->|Audio| B[Whisper + Wake Word]
+    
+    B -->|Text| C[LLM Planner<br/>(Brain)]
+    
+    subgraph Perception
+    D[Camera] --> E[YOLO-World / CLIP]
+    D --> F[Depth / Point Cloud]
+    F --> G[Nav2 Costmap]
+    end
+    
+    C -->|Plan| H[State Machine<br/>(Executor)]
+    
+    H -->|Nav Goal| I[Nav2 Stack]
+    H -->|Grasp Goal| J[MoveIt / Control]
+    
+    E -->|Object Pose| H
+    
+    J -->|Joint Cmds| K[Robot Actuators]
+    I -->|Vel Cmds| K
+    
+    H -->|Status| L[TTS Engine]
+    L -->|Speech| User
+```
+
+---
+
+## 3. The State Machine (The Conductor)
+
+We need a rigorous **Finite State Machine (FSM)** to manage the flow. An LLM is a *Planner*, not a *Controller*. The FSM ensures safety.
+
+We recommend **SMACH** or **Behavior Trees (py_trees)**.
+
+### State Flow
+
+1. **IDLE**: Waiting for Wake Word.
+2. **LISTENING**: Recording audio.
+3. **THINKING**: Whisper + LLM Planning.
+4. **EXECUTING**:
+   - **NAVIGATING**: Moving to target area.
+   - **SEARCHING**: Rotating/Scanning for objects.
+   - **APPROACHING**: Fine motion to object.
+   - **GRASPING**: Closing gripper.
+   - **CARRYING**: Navigating to bin.
+   - **RELEASING**: Opening gripper.
+5. **REPORTING**: "Task complete."
+
+---
+
+## 4. Implementation Steps
+
+### Step A: The "Brain" (LLM Node)
+- **Input**: "Clean the room."
+- **Prompt**:
+  > "You are a cleaning robot. Trash items are: [Soda Can, Banana Peel, Paper]. Keep items are: [Toy, Book]. 
+  > Current Objects Visible: [Red Soda Can, Toy Bear].
+  > Generate a plan."
+- **Output**: `["pick('Red Soda Can')", "place('Blue Bin')"]`.
+
+### Step B: The "Eyes" (Perception Node)
+- Run **YOLO-World** or **Isaac ROS Object Detection**.
+- **Transformation**: Convert 2D Bounding Box $(u, v)$ + Depth $(d)$ $\rightarrow$ 3D World Pose $(x, y, z)$.
+- **Code Snippet**:
+  ```python
+  # Pixel to World
+  z = depth_image[v, u]
+  x = (u - cx) * z / fx
+  y = (v - cy) * z / fy
+  point_camera = [x, y, z]
+  point_world = tf_buffer.transform(point_camera, "map")
+  ```
+
+### Step C: The "Legs" (Navigation)
+- Use **Nav2** Action Client (`NavigateToPose`).
+- **Critical**: Ensure the robot stops *before* hitting the object (set `goal_tolerance` correctly).
+
+### Step D: The "Hands" (Manipulation)
+- For the Capstone, simple **Magnetic Grasping** (Simulation) or **Open Loop Grasping** (Real) is acceptable if MoveIt is too complex.
+- **Sim**: `isaac_sim.gripper.close()` (attaches object to hand).
+
+---
+
+## 5. Evaluation & Rubric
+
+Your project will be graded on the following criteria (Total: 100 pts):
+
+| Category | Criteria | Points |
+|----------|----------|--------|
+| **Integration** | All subsystems (Voice, Nav, Vision, Plan) work together | 30 |
+| **Robustness** | 3 consecutive successful runs without restart | 20 |
+| **Complexity** | Handles dynamic obstacles or reasoning (e.g., "Don't throw the bear") | 20 |
+| **Code Quality** | Modular ROS 2 nodes, Launch files, Documentation | 15 |
+| **Demo** | Video presentation with voice-over explaining the flow | 15 |
+
+### Bonus Points (Max +15)
+- **Fall Recovery**: Robot stands up if pushed (+10).
+- **Unknown Objects**: User defines new trash type by voice (+5).
+
+---
+
+## 6. Submission Guidelines
+
+1. **GitHub Repository**:
+   - `src/` (Source code)
+   - `launch/` (One-click launch file: `ros2 launch capstone bringup.launch.py`)
+   - `README.md` (Installation & Running instructions)
+   - `architecture.png` (System diagram)
+
+2. **Video Demo (YouTube/Vimeo)**:
+   - Max 3 minutes.
+   - Show: Wake Word -> Command -> Navigation -> Grasp -> Release.
+   - Show: Rviz visualization side-by-side with simulation/camera.
+
+---
+
+## 7. Troubleshooting The "Happy Path"
+
+Systems fail. Here is how to debug the integration:
+
+- **Robot ignores voice**: Check `pavucontrol` (Linux audio settings). Is the mic muted?
+- **Robot hits walls**: Inflate the Nav2 Costmap radius.
+- **Robot misses grab**: Check TF tree. Is `camera_link` calibration accurate?
+- **LLM hallucinates**: Reduce `temperature` to 0.1. Hardcode object names in system prompt.
+
+---
+
+## Final Words
+
+This Capstone is not just a homework assignment. It is a **portfolio piece**. 
+A fully autonomous, voice-controlled, reasoning humanoid is "State of the Art" technology. Building this proves you are ready for the Robotics industry.
+
+**Good Luck. Build something amazing.** 🚀🤖
+
+---
+
+:::note Chapter Completion
+✅ You've completed Chapter 19: Capstone Project  
+⏱️ Estimated time to complete: 2 Weeks  
+📊 Progress: Module 4 - Chapter 4 of 5
+:::

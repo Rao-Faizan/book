@@ -1,0 +1,829 @@
+---
+title: "Chapter 12: Isaac Sim for Photorealistic Simulation"
+description: "Hands-on guide to NVIDIA Isaac Sim including installation, UI navigation, robot import, scene building, Python API, and synthetic data generation"
+sidebar_position: 12
+---
+
+# Chapter 12: Isaac Sim for Photorealistic Simulation
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+
+- **Install** Isaac Sim via NVIDIA Omniverse Launcher
+- **Navigate** the Isaac Sim user interface and viewport
+- **Import** URDF robots and convert to USD format
+- **Create** photorealistic warehouse scenes with props and lighting
+- **Configure** robot articulations and physics properties
+- **Write** Python scripts using Isaac Sim API for automation
+- **Generate** synthetic training data with Replicator
+
+**Prerequisites**: Chapter 11 (Isaac ecosystem understanding)  
+**Hardware**: RTX 2070+ GPU, 32GB RAM, Ubuntu 22.04  
+**Estimated Time**: 120 minutes
+
+---
+
+## Installation: Getting Isaac Sim
+
+### Step 1: Install Omniverse Launcher
+
+**Download Omniverse Launcher**:
+
+```bash
+# Visit and download:
+https://www.nvidia.com/en-us/omniverse/download/
+
+# Or direct download (Linux):
+wget https://install.launcher.omniverse.nvidia.com/installers/omniverse-launcher-linux.AppImage
+
+# Make executable
+chmod +x omniverse-launcher-linux.AppImage
+
+# Run launcher
+./omniverse-launcher-linux.AppImage
+```
+
+**First Launch**:
+1. Create/sign in to NVIDIA account (free)
+2. Accept license agreements
+3. Launcher will update automatically
+
+---
+
+### Step 2: Install Isaac Sim
+
+**In Omniverse Launcher**:
+
+1. Click **"Exchange"** tab (top)
+2. Search for **"Isaac Sim"**
+3. Click **"Install"** button
+4. Select version: **2023.1.1** (latest stable)
+5. Installation location: `/home/username/.local/share/ov/pkg/isaac_sim-2023.1.1`
+
+**Installation Size**: ~10 GB  
+**Time**: 30-60 minutes (depends on internet speed)
+
+:::warning GPU Check
+During installation, Omniverse will check GPU compatibility. If you see errors, verify you have:
+- NVIDIA RTX GPU
+- Latest drivers: `nvidia-smi` should show driver version 525+
+:::
+
+---
+
+### Step 3: Launch Isaac Sim
+
+**From Omniverse Launcher**:
+1. Click **"Library"** tab
+2. Find **"Isaac Sim"**
+3. Click **"Launch"**
+
+**First Launch**:
+- Shader compilation: 5-10 minutes (one-time)
+- Isaac Sim window opens with default scene
+
+**Verify Installation**:
+- Menu bar shows: File, Edit, Create, Window, Isaac, ROS, etc.
+- Viewport displays stadium environment
+- No error popups
+
+🎉 **Success!** You're ready to simulate!
+
+---
+
+## Isaac Sim User Interface Tour
+
+### Main UI Components
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Menu Bar: File | Edit | Create | Window | Isaac | ROS  │
+├──────────┬──────────────────────────────────┬───────────┤
+│          │                                  │           │
+│ Stage    │      3D Viewport                 │ Property  │
+│ (Scene   │      (Main view)                 │ Inspector │
+│  Tree)   │                                  │           │
+│          │                                  │           │
+├──────────┴──────────────────────────────────┴───────────┤
+│  Timeline: ▶ Play | ⏸ Pause | ⏹ Stop  [Frame slider]   │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Key Panels
+
+**1. Stage (Left Panel)**
+- Hierarchical view of scene
+- Shows all USD prims (primitives/objects)
+- Right-click for context menu
+
+**2. Viewport (Center)**
+- 3D view of simulation
+- **Navigation**:
+  - **Rotate**: Middle mouse button + drag
+  - **Pan**: Shift + Middle mouse + drag
+  - **Zoom**: Mouse wheel
+  - **Focus**: F key (with object selected)
+
+**3. Property Inspector (Right Panel)**
+- Shows selected object's properties
+- Edit transforms, physics, materials
+- Add/remove components
+
+**4. Content Browser (Bottom)**
+- File system navigator
+- Asset library (props, materials, robots)
+
+---
+
+### Viewport Controls
+
+| Action | Shortcut | Description |
+|--------|----------|-------------|
+| **Select** | Left click | Select object |
+| **Multi-select** | Ctrl + click | Select multiple objects |
+| **Deselect** | Click empty space | Clear selection |
+| **Frame selected** | F | Center camera on object |
+| **Top view** | Numpad 7 | Orthographic top view |
+| **Front view** | Numpad 1 | Orthographic front view |
+| **Perspective** | Numpad 0 | Return to perspective |
+
+---
+
+## Creating Your First Scene
+
+### Step 1: Create New Empty Scene
+
+```
+File → New
+```
+
+**This gives you**:
+- Empty "World" root
+- Default lighting (DistantLight)
+- Physics scene (gravity enabled)
+
+---
+
+### Step 2: Add Ground Plane
+
+**Create → Physics → Ground Plane**
+
+Or via Python console (Window → Script Editor):
+
+```python
+import omni.isaac.core.utils.stage as stage_utils
+
+# Create ground plane
+stage_utils.add_reference_to_stage(
+    usd_path="/Isaac/Environments/Grid/default_environment.usd",
+    prim_path="/World/Environment"
+)
+print("Ground plane added!")
+```
+
+**Result**: Grid floor appears in viewport
+
+---
+
+### Step 3: Add Lighting
+
+**Create → Light → Dome Light**
+
+**Configure** (in Property panel):
+- **Intensity**: 1000
+- **Texture**: Use HDRI (High Dynamic Range Image)
+  - Browse to: `omniverse://localhost/NVIDIA/Assets/Skies/`
+  - Select: `sundown.hdr` for realistic outdoor lighting
+
+**Effect**: Scene now has realistic ambient lighting and reflections
+
+---
+
+## Importing URDF Robots
+
+### Method 1: UI Import
+
+**Isaac Utils → URDF Importer**
+
+Settings:
+- **Input File**: Browse to your `humanoid.urdf`
+- **Import Path**: `/World/Humanoid`
+- **Fix Base Link**: ✅ (checked)
+- **Join Fixes**: `revolute`
+- **Self Collision**: ✅
+- **Create Physics Scene**: ✅
+
+Click **"Import"**
+
+**Result**: URDF converted to USD, appears in scene!
+
+---
+
+### Method 2: Python API Import
+
+```python
+from omni.isaac.core.utils.extensions import enable_extension
+enable_extension("omni.importer.urdf")
+
+import omni.kit.commands
+from pxr import UsdGeom
+
+# Import URDF
+omni.kit.commands.execute(
+    "URDFParseAndImportFile",
+    urdf_path="/path/to/humanoid.urdf",
+    import_config={
+        "set_fix_base": False,  # Humanoid can move
+        "merge_fixed_joints": False,
+        "self_collision": True,
+        "default_drive_type": "position",  # Use position control
+        "default_position_drive_damping": 1000.0,
+        "default_drive_stiffness": 10000.0
+    },
+    dest_path="/World/Humanoid"
+)
+
+print("✅ URDF imported successfully!")
+
+# Position robot above ground
+humanoid_prim = stage.GetPrimAtPath("/World/Humanoid")
+xform = UsdGeom.Xformable(humanoid_prim)
+xform.AddTranslateOp().Set((0, 0, 1.0))  # 1m above ground
+```
+
+---
+
+### Understanding Articulation
+
+**Articulation** (in PhysX) = Robot with joints
+
+**Key Components** (visible in Property panel):
+- **ArticulationRoot**: Main robot component
+- **ArticulationJoints**: Each joint (shoulder, elbow, etc.)
+- **Rigid Bodies**: Each link (torso, arm, leg)
+
+**Joint Properties**:
+- **Drive Type**: Position, Velocity, or Force
+- **Stiffness**: How strongly joint resists deviation (P gain)
+- **Damping**: How much joint resists motion (D gain)
+- **Limits**: Min/max joint angles
+
+---
+
+## Building a Warehouse Scene
+
+### Complete Warehouse Setup
+
+```python
+import omni.isaac.core.utils.stage as stage_utils
+from pxr import Gf, UsdGeom, UsdLux
+
+# 1. Clear existing scene
+stage_utils.create_new_stage()
+
+# 2. Add warehouse environment
+stage_utils.add_reference_to_stage(
+    usd_path="/Isaac/Environments/Simple_Warehouse/warehouse.usd",
+    prim_path="/World/Warehouse"
+)
+
+# 3. Add dome light
+dome_light = UsdLux.DomeLight.Define(stage, "/World/DomeLight")
+dome_light.CreateIntensityAttr(1500)
+
+# 4. Spawn humanoid robot
+omni.kit.commands.execute(
+    "URDFParseAndImportFile",
+    urdf_path="/path/to/humanoid.urdf",
+    dest_path="/World/Humanoid"
+)
+
+# Position humanoid at warehouse entrance
+humanoid_prim = stage.GetPrimAtPath("/World/Humanoid")
+UsdGeom.Xformable(humanoid_prim).AddTranslateOp().Set((2, 0, 1.0))
+
+# 5. Add camera for third-person view
+camera = UsdGeom.Camera.Define(stage, "/World/Camera")
+camera.AddTranslateOp().Set((5, 5, 3))
+camera.AddRotateXYZOp().Set((0, 0, 0))
+camera.GetFocalLengthAttr().Set(24)
+
+print("🏭 Warehouse scene created!")
+```
+
+---
+
+### Adding Props (Boxes, Pallets)
+
+```python
+from omni.isaac.core.objects import DynamicCuboid
+import numpy as np
+
+# Create random boxes
+for i in range(10):
+    position = np.array([
+        np.random.uniform(-5, 5),  # x
+        np.random.uniform(-5, 5),  # y
+        0.5  # z (half-height)
+    ])
+    
+    size = np.random.uniform(0.3, 1.0)
+    
+    box = DynamicCuboid(
+        prim_path=f"/World/Box_{i}",
+        name=f"box_{i}",
+        position=position,
+        size=size,
+        color=np.random.rand(3)  # Random RGB color
+    )
+
+print("📦 Added 10 random boxes to scene")
+```
+
+---
+
+## Configuring Materials and Appearance
+
+### Assigning PBR Materials
+
+**Physically Based Rendering** (PBR) materials for realism:
+
+```python
+import omni.kit.material.library as mat_lib
+from pxr import UsdShade, Sdf
+
+def apply_metal_material(prim_path):
+    """Apply realistic metal material to object"""
+    
+    # Create material
+    material_path = f"{prim_path}/Material"
+    material = UsdShade.Material.Define(stage, material_path)
+    
+    # Create shader
+    shader = UsdShade.Shader.Define(stage, f"{material_path}/Shader")
+    shader.CreateIdAttr("UsdPreviewSurface")
+    
+    # Set properties
+    shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set((0.7, 0.7, 0.8))
+    shader.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(0.9)  # Very metallic
+    shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.3)  # Slightly rough
+    
+    # Bind material to object
+    prim = stage.GetPrimAtPath(prim_path)
+    UsdShade.MaterialBindingAPI(prim).Bind(material)
+    
+    print(f"✨ Applied metal material to {prim_path}")
+
+# Apply to robot torso
+apply_metal_material("/World/Humanoid/torso_link")
+```
+
+---
+
+### Material Presets
+
+Isaac Sim includes material library:
+
+```python
+# Load from library
+omni.kit.commands.execute(
+    "ApplyMaterialToSelection",
+    material_path="omniverse://localhost/NVIDIA/Materials/2023/vMaterials/Ceramic/Ceramic_Tile_White.mdl"
+)
+```
+
+**Common Materials**:
+- **Metals**: `vMaterials/Metals/Steel_Brushed.mdl`
+- **Plastics**: `vMaterials/Plastics/Plastic_Black.mdl`
+- **Wood**: `vMaterials/Wood/Wood_American_Cherry.mdl`
+
+---
+
+## Running Physics Simulation
+
+### Play/Pause/Stop Controls
+
+**Via UI**:
+- **Play**: ▶ button (or Space bar)
+- **Pause**: ⏸ button
+- **Stop**: ⏹ button (resets to frame 0)
+
+**Via Python**:
+
+```python
+from omni.isaac.core import SimulationContext
+
+# Create simulation context
+sim = SimulationContext(stage_units_in_meters=1.0)
+
+# Initialize
+sim.initialize_physics()
+
+# Run simulation for 100 steps
+for i in range(100):
+    sim.step(render=True)  # render=True updates viewport
+    
+    if i % 10 == 0:
+        print(f"Simulation step: {i}")
+
+# Stop simulation
+sim.stop()
+```
+
+---
+
+### Applying Forces to Robot
+
+```python
+from omni.isaac.core.utils.physics import simulate_async
+from pxr import PhysxSchema
+
+# Get robot's rigid body
+torso_prim = stage.GetPrimAtPath("/World/Humanoid/torso_link")
+rigid_body = PhysxSchema.RigidBodyAPI(torso_prim)
+
+# Apply force (e.g., push robot forward)
+force = Gf.Vec3f(100, 0, 0)  # 100N in X direction
+position = Gf.Vec3f(0, 0, 0)  # At center of mass
+
+# Must be called during simulation
+sim.play()
+for _ in range(100):
+    rigid_body.Apply(force, position)
+    sim.step()
+sim.stop()
+```
+
+---
+
+## Controlling Robot Joints
+
+### Position Control Example
+
+```python
+from omni.isaac.core.articulations import Articulation
+
+# Get robot articulation
+humanoid = Articulation("/World/Humanoid")
+humanoid.initialize()
+
+# Get joint names
+joint_names = humanoid.dof_names
+print(f"Robot has {len(joint_names)} joints: {joint_names}")
+
+# Set target positions (radians)
+target_positions = {
+    "right_shoulder_joint": 0.5,  # 28.6 degrees
+    "right_elbow_joint": 1.0,     # 57.3 degrees
+    "left_shoulder_joint": -0.5,
+    "left_elbow_joint": -1.0
+}
+
+# Apply positions
+sim.play()
+for _ in range(200):  # Run for 200 steps
+    humanoid.set_joint_positions(
+        positions=[target_positions.get(name, 0.0) for name in joint_names]
+    )
+    sim.step()
+sim.stop()
+
+print("🤖 Robot moved to target pose!")
+```
+
+---
+
+### Velocity Control
+
+```python
+# Set joint velocities (rad/s)
+target_velocities = {
+    "right_shoulder_joint": 1.0,  # Rotate at 1 rad/s
+}
+
+sim.play()
+for _ in range(300):
+    humanoid.set_joint_velocities(
+        velocities=[target_velocities.get(name, 0.0) for name in joint_names]
+    )
+    sim.step()
+sim.stop()
+```
+
+---
+
+## Isaac Sim Python API Overview
+
+### Core Modules
+
+```python
+# Scene management
+from omni.isaac.core import World
+from omni.isaac.core.objects import GroundPlane, DynamicCuboid, Sphere
+
+# Robot control
+from omni.isaac.core.robots import Robot
+from omni.isaac.core.articulations import Articulation
+
+# Sensors
+from omni.isaac.core.utils.camera import Camera
+
+# Simulation
+from omni.isaac.core import SimulationContext
+
+# ROS 2 bridge
+from omni.isaac.ros2_bridge import ROS2Bridge
+```
+
+---
+
+### Complete Automation Script
+
+```python
+"""
+Complete Isaac Sim automation: Create scene, spawn robot, run simulation
+"""
+from omni.isaac.core import World
+from omni.isaac.core.objects import DynamicCuboid
+from omni.isaac.core.articulations import Articulation
+import numpy as np
+
+# Create world
+world = World(stage_units_in_meters=1.0)
+world.scene.add_default_ground_plane()
+
+# Import robot (assumes URDF already imported)
+humanoid = world.scene.add(
+    Articulation(
+        prim_path="/World/Humanoid",
+        name="humanoid_robot"
+    )
+)
+
+# Add obstacles
+for i in range(5):
+    box = world.scene.add(
+        DynamicCuboid(
+            prim_path=f"/World/Obstacle_{i}",
+            name=f"obstacle_{i}",
+            position=np.array([np.random.uniform(-3, 3), np.random.uniform(-3, 3), 0.5]),
+            size=0.5,
+            color=np.array([1, 0, 0])  # Red
+        )
+    )
+
+# Reset world
+world.reset()
+
+# Main simulation loop
+for step in range(500):
+    # Get current joint positions
+    current_positions = humanoid.get_joint_positions()
+    
+    # Simple sine wave motion for right arm
+    target = current_positions.copy()
+    target[0] = np.sin(step * 0.01)  # Assuming index 0 is right shoulder
+    
+    # Apply targets
+    humanoid.set_joint_position_targets(target)
+    
+    # Step simulation
+    world.step(render=True)
+    
+    if step % 100 == 0:
+        print(f"Sim step {step}: Robot joint 0 at {current_positions[0]:.2f} rad")
+
+print("✅ Simulation complete!")
+```
+
+---
+
+## Synthetic Data Generation with Replicator
+
+**Replicator** is Isaac Sim's tool for creating large-scale annotated datasets.
+
+### Basic Replicator Workflow
+
+```python
+import omni.replicator.core as rep
+
+# 1. Define camera
+camera = rep.create.camera(position=(3, 3, 2), look_at=(0, 0, 0.5))
+
+# 2. Define randomizers
+def randomize_lighting():
+    lights = rep.get.prims(path_pattern="/World/Dome*")
+    with lights:
+        rep.modify.attribute("intensity", rep.distribution.uniform(500, 5000))
+
+def randomize_objects():
+    boxes = rep.get.prims(path_pattern="/World/Box_*")
+    with boxes:
+        rep.modify.pose(
+            position=rep.distribution.uniform((-5, -5, 0.5), (5, 5, 2)),
+            rotation=rep.distribution.uniform((0, 0, 0), (360, 360, 360))
+        )
+
+# 3. Register randomizers
+rep.randomizer.register(randomize_lighting)
+rep.randomizer.register(randomize_objects)
+
+# 4. Configure output
+render_product = rep.create.render_product(camera, (640, 480))
+
+# Write RGB images
+writer = rep.WriterRegistry.get("BasicWriter")
+writer.initialize(
+    output_dir="./synthetic_data",
+    rgb=True,
+    bounding_box_2d_tight=True,  # Object annotations
+    semantic_segmentation=True
+)
+writer.attach([render_product])
+
+# 5. Run generation
+with rep.trigger.on_frame(num_frames=1000):
+    rep.randomizer.randomize_lighting()
+    rep.randomizer.randomize_objects()
+
+# Execute
+rep.orchestrator.run()
+
+print("📸 Generated 1000 synthetic images in ./synthetic_data/")
+```
+
+---
+
+### Output Format
+
+Generated data structure:
+
+```
+synthetic_data/
+├── rgb/
+│   ├── rgb_0000.png
+│   ├── rgb_0001.png
+│   └── ...
+├── bounding_box_2d_tight/
+│   ├── bounding_box_2d_tight_0000.npy
+│   └── ...
+├── semantic_segmentation/
+│   ├── semantic_segmentation_0000.png
+│   └── ...
+└── metadata.json
+```
+
+**metadata.json** contains annotations in COCO format.
+
+---
+
+## Debugging and Troubleshooting
+
+### Common Issues
+
+**Issue 1: Robot Falls Through Ground**
+
+**Symptom**: Robot spawns and immediately falls into void
+
+**Solution**:
+```python
+# Ensure ground has collision
+ground_prim = stage.GetPrimAtPath("/World/GroundPlane")
+from pxr import UsdPhysics
+collision_api = UsdPhysics.CollisionAPI.Apply(ground_prim)
+collision_api.CreateCollisionEnabledAttr(True)
+```
+
+---
+
+**Issue 2: Slow Simulation (RTF < 0.3)**
+
+**Solutions**:
+1. **Reduce physics timestep**:
+   ```python
+   from omni.physx import get_physx_simulation_interface
+   physx = get_physx_simulation_interface()
+   physx.set_simulation_params(
+       gravity_magnitude=9.81,
+       time_step=1/120  # Increase from default 1/60
+   )
+   ```
+
+2. **Simplify collision meshes** (use boxes instead of complex meshes)
+
+3. **Disable shadows** temporarily:
+   ```python
+   # In viewport settings
+   # Render Settings → Shadows → Off
+   ```
+
+---
+
+**Issue 3: URDF Import Fails**
+
+**Checklist**:
+- [ ] All mesh files (.stl/.dae) exist at specified paths
+- [ ] URDF uses relative paths or absolute paths
+- [ ] No circular dependencies in joints
+- [ ] Inertia values are reasonable (not zero or NaN)
+
+---
+
+## Performance Tips
+
+### Optimize for Speed
+
+```python
+#System settings for faster sim
+import carb.settings
+
+settings = carb.settings.get_settings()
+
+# Reduce rendering quality during training
+settings.set("/rtx/rendermode", "RaytracedLighting")  # Instead of PathTracing
+settings.set("/app/asyncRendering", True)
+settings.set("/app/asyncRenderingLowLatency", False)
+
+# Increase physics timestep (less accurate, faster)
+settings.set("/physics/timeStepsPerSecond", 120)  # Down from 240
+```
+
+---
+
+## Summary
+
+### 🎯 Key Takeaways
+
+- **Isaac Sim** installs via Omniverse Launcher
+- **UI** has familiar 3D software layout (Stage, Viewport, Properties)
+- **URDF import** converts to USD with full articulation support
+- **Python API** enables complete automation for large-scale testing
+- **Replicator** generates synthetic datasets with automatic annotations
+- **PhysX** provides GPU-accelerated, accurate robot physics
+- **Performance** requires RTX GPU and careful optimization
+
+---
+
+## Hands-On Exercise
+
+### Task: Create Autonomous Navigation Scene
+
+**Requirements**:
+1. Import your humanoid URDF from Module 1
+2. Create simple warehouse with 10 random box obstacles
+3. Add dome lighting with HDRI
+4. Write Python script to:
+   - Position robot at start (0, 0, 1)
+   - Apply PID control to right arm (wave motion)
+   - Run for 500 simulation steps
+   - Save screenshot every 100 steps
+5. Generate 100 synthetic images with randomized lighting
+
+**Success Criteria**:
+- Robot imports without errors
+- Simulation runs at >0.5 RTF
+- Python script executes fully
+- 100 annotated images generated
+
+**Estimated Time**: 60 minutes
+
+---
+
+## Further Resources
+
+### Official Documentation
+- 📘 [Isaac Sim Manual](https://docs.omniverse.nvidia.com/isaacsim/latest/manual.html) - Complete guide
+- 🐍 [Python API Reference](https://docs.omniverse.nvidia.com/py/isaacsim/index.html) - All classes/functions
+- 📸 [Replicator Tutorial](https://docs.omniverse.nvidia.com/prod_extensions/prod_extensions/ext_replicator.html) - Synthetic data
+
+### Video Tutorials
+- 🎥 [Isaac Sim Quick Start](https://www.youtube.com/watch?v=<example>) - NVIDIA official (15 min)
+- 🎥 [Replicator Basics](https://www.youtube.com/watch?v=<example>) - Data generation guide
+
+### Community
+- 💬 [NVIDIA Forums - Isaac Sim](https://forums.developer.nvidia.com/c/omniverse/simulation/69) - Technical support
+- 💬 [Discord - NVIDIA Omniverse](https://discord.gg/<example>) - Community chat
+
+---
+
+## What's Next?
+
+In **Chapter 13**, you'll deploy **Isaac ROS for Hardware-Accelerated SLAM**:
+- Installing Isaac ROS on Ubuntu 22.04 and Jetson
+- Configuring Visual SLAM with stereo cameras
+- GPU-accelerated depth processing
+- Real-time odometry and mapping
+- Deploying to Jetson Orin Nano
+
+**Get ready to bring GPU power to perception!** 🚀👁️
+
+---
+
+:::note Chapter Completion
+✅ You've completed Chapter 12: Isaac Sim for Photorealistic Simulation  
+⏱️ Estimated time to complete: 120 minutes  
+📊 Progress: Module 3 - Chapter 2 of 5
+:::
