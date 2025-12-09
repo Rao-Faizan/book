@@ -1,0 +1,924 @@
+---
+title: Bridging Python AI Agents to ROS 2 Controllers
+description: Integrate Python-based AI agents with ROS 2 control systems for humanoid robots, managing state and using asynchronous programming.
+sidebar_position: 3
+---
+
+# Bridging Python AI Agents to ROS 2 Controllers
+
+This chapter focuses on integrating Python-based AI agents with ROS 2 control systems for humanoid robots. You will learn how to manage state effectively and leverage asynchronous programming patterns to create responsive and intelligent robotic behaviors.
+
+## Design Pattern: Separating AI Logic from ROS Communication
+
+To build robust and maintainable robotic systems, it is crucial to separate the core AI decision-making logic from the ROS 2 communication layer. This modular approach offers several benefits:
+
+1.  **Reusability**: The AI logic can be developed and tested independently of ROS, potentially being reused in other platforms or simulators.
+2.  **Testability**: Unit testing the AI algorithms becomes straightforward without requiring a running ROS environment.
+3.  **Flexibility**: Changes in ROS versions or communication patterns have minimal impact on the AI core.
+4.  **Clarity**: The codebase is cleaner, with clear responsibilities for each module.
+
+### Recommended Structure
+
+Consider the following two-component design pattern:
+
+#### 1. AI Core Module (ROS-agnostic)
+
+This module encapsulates all the intelligence, algorithms, state management, and decision-making processes. It should:
+
+-   Operate on abstract data structures (e.g., sensor data as Python dicts or custom classes, command outputs as desired actions).
+-   Not contain any ROS 2 imports or dependencies.
+-   Focus purely on the AI problem (e.g., path planning, object recognition, behavior generation).
+
+```python
+# ai_core_module.py
+
+class AICore:
+    def __init__(self):
+        self.internal_state = {}
+
+    def process_sensor_data(self, sensor_data: dict) -> dict:
+        # Process sensor data and update internal state
+        # ...
+        # Return decisions/commands
+        return {"linear_velocity": 0.1, "angular_velocity": 0.0}
+
+    def update_state(self, new_state_info: dict):
+        # Update internal state based on new information or feedback
+        pass
+
+```
+
+#### 2. ROS Wrapper/Interface Module (ROS-dependent)
+
+This module acts as the bridge between the ROS 2 ecosystem and your AI core. It should:
+
+-   Handle all ROS 2 communication (subscribers, publishers, services, actions).
+-   Translate incoming ROS messages into a format consumable by the AI core.
+-   Translate AI core's decisions/commands into ROS messages for publication.
+-   Manage the ROS node lifecycle and spinning.
+
+```python
+# ros_interface_module.py
+
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import Twist
+# from your_custom_msgs.msg import SensorData # Example custom message
+
+# from .ai_core_module import AICore # Import your AI core
+
+class ROSAIInterface(Node):
+    def __init__(self):
+        super().__init__('ai_agent_node')
+        self.ai_core = AICore() # Instantiate your AI core
+
+        # ROS Publishers and Subscribers
+        self.publisher_ = self.create_publisher(Twist, 'cmd_vel', 10)
+        # self.subscription = self.create_subscription(SensorData, 'sensor_topic', self.sensor_callback, 10)
+        self.timer = self.create_timer(0.1, self.timer_callback) # 10 Hz control loop
+
+    # def sensor_callback(self, msg: SensorData):
+    #     # Translate ROS message to AI core data format
+    #     sensor_data_dict = {"distance": msg.distance, "angle": msg.angle}
+    #     self.ai_core.update_state(sensor_data_dict)
+
+    def timer_callback(self):
+        # Example: Generate dummy sensor data for AI core
+        dummy_sensor_data = {"distance_front": 1.5, "camera_objects": ["obstacle"]}
+
+        # Get commands from AI core
+        ai_commands = self.ai_core.process_sensor_data(dummy_sensor_data)
+
+        # Translate AI commands to ROS message
+        twist_msg = Twist()
+        twist_msg.linear.x = ai_commands.get("linear_velocity", 0.0)
+        twist_msg.angular.z = ai_commands.get("angular_velocity", 0.0)
+
+        self.publisher_.publish(twist_msg)
+        self.get_logger().info(f'Publishing: "{twist_msg.linear.x}, {twist_msg.angular.z}"')
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    ai_interface = ROSAIInterface()
+    rclpy.spin(ai_interface)
+    ai_interface.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+This pattern ensures a clean separation of concerns, making your AI agents easier to develop, test, and integrate into various robotic platforms.
+
+### Structuring Python Classes for AI Agent and ROS Node Wrapper
+
+The example code provided above for `ai_core_module.py` and `ros_interface_module.py` demonstrates a clear class structure:
+
+-   **`AICore` Class**: This class is designed to be purely responsible for the AI's internal logic. It contains methods like `process_sensor_data` for decision-making and `update_state` for maintaining its internal model. It does not interact directly with ROS 2.
+
+-   **`ROSAIInterface` Class**: Inheriting from `rclpy.node.Node`, this class manages all ROS 2 specific functionalities. It instantiates the `AICore` as a member, allowing it to delegate AI-related tasks to the `AICore` instance. Its methods (e.g., `sensor_callback`, `timer_callback`) are responsible for:
+    -   Receiving data from ROS topics (subscribers).
+    -   Translating this data into a format suitable for the `AICore`.
+    -   Calling `AICore` methods to get decisions.
+    -   Translating `AICore` outputs back into ROS messages.
+    -   Publishing commands to ROS topics.
+
+This clear division of labor between `AICore` (brain) and `ROSAIInterface` (communicator) promotes maintainability and allows for independent evolution of the AI and ROS components.
+
+### Structuring Python Classes for AI Agent and ROS Node Wrapper
+
+The example code provided above for `ai_core_module.py` and `ros_interface_module.py` demonstrates a clear class structure:
+
+-   **`AICore` Class**: This class is designed to be purely responsible for the AI's internal logic. It contains methods like `process_sensor_data` for decision-making and `update_state` for maintaining its internal model. It does not interact directly with ROS 2.
+
+-   **`ROSAIInterface` Class**: Inheriting from `rclpy.node.Node`, this class manages all ROS 2 specific functionalities. It instantiates the `AICore` as a member, allowing it to delegate AI-related tasks to the `AICore` instance. Its methods (e.g., `sensor_callback`, `timer_callback`) are responsible for:
+    -   Receiving data from ROS topics (subscribers).
+    -   Translating this data into a format suitable for the `AICore`.
+    -   Calling `AICore` methods to get decisions.
+    -   Translating `AICore` outputs back into ROS messages.
+    -   Publishing commands to ROS topics.
+
+This clear division of labor between `AICore` (brain) and `ROSAIInterface` (communicator) promotes maintainability and allows for independent evolution of the AI and ROS components.
+
+## Passing Sensor Data from ROS Subscribers to AI Agent Decision Functions
+
+The `ROSAIInterface` class is designed to act as a bridge, translating raw ROS messages into structured data that your `AICore` can readily process. This is primarily handled within the subscriber's callback function.
+
+### Example: Sensor Data Flow
+
+Let's assume you have a custom ROS 2 message type, `SensorData.msg`, defined as follows:
+
+```msg
+# your_custom_msgs/msg/SensorData.msg
+float32 distance
+float32 angle
+string[] detected_objects
+```
+
+First, ensure your `ros_interface_module.py` imports this custom message type. Then, implement a subscriber that listens to a sensor topic and a callback function that processes the incoming data:
+
+```python
+# ros_interface_module.py (excerpt)
+
+# from your_custom_msgs.msg import SensorData # Uncomment this line
+from example_interfaces.msg import Float32 # Using a standard message for simplicity
+
+class ROSAIInterface(Node):
+    def __init__(self):
+        # ... (other initializations) ...
+        self.ai_core = AICore()
+
+        # Create a subscription to a sensor topic
+        self.subscription = self.create_subscription(
+            Float32, # Replace with your custom SensorData message
+            'sensor_topic',
+            self.sensor_callback,
+            10
+        )
+        self.get_logger().info('Subscribing to /sensor_topic')
+        # ...
+
+    def sensor_callback(self, msg: Float32): # Replace Float32 with SensorData
+        # 1. Translate ROS message to AI core data format
+        #    This step is crucial for decoupling.
+        sensor_data_for_ai = {
+            "current_distance": msg.data, # msg.distance if using SensorData
+            "current_angle": 0.0, # msg.angle if using SensorData
+            "objects_in_view": [] # msg.detected_objects if using SensorData
+        }
+
+        # 2. Pass translated data to the AI core for processing
+        self.ai_core.update_state(sensor_data_for_ai)
+        self.get_logger().info(f'Received sensor data and updated AI state: {sensor_data_for_ai}')
+
+    # ... (timer_callback and main function) ...
+```
+
+In this enhanced example:
+
+-   The `sensor_callback` method receives a `Float32` (or your custom `SensorData`) message.
+-   Inside the callback, the ROS message content (`msg.data` for `Float32`, or `msg.distance`, `msg.angle`, `msg.detected_objects` for `SensorData`) is extracted and transformed into a Python dictionary (`sensor_data_for_ai`). This dictionary serves as the standardized input format for your `AICore`.
+-   `self.ai_core.update_state(sensor_data_for_ai)` is called, passing the processed sensor data directly to your AI logic. The `AICore` can then use this data for its internal state updates or decision-making processes.
+
+This pattern ensures that your AI logic (`AICore`) remains clean and focused on intelligence, while the `ROSAIInterface` handles the specifics of ROS 2 communication and data translation.
+
+## Publishing AI Agent Output via ROS Publishers
+
+Once your AI agent (`AICore`) has made a decision and generated commands (e.g., desired velocities, joint angles, or high-level actions), the `ROSAIInterface` is responsible for translating these commands into appropriate ROS 2 messages and publishing them to the robot's control system.
+
+### Example: Command Publishing Flow
+
+Continuing with the previous example, where our `AICore` outputs a dictionary with linear and angular velocities, the `timer_callback` in `ROSAIInterface` can be used to periodically fetch these commands and publish them:
+
+```python
+# ros_interface_module.py (excerpt)
+
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import Twist
+# from your_custom_msgs.msg import SensorData # Example custom message
+# from your_custom_msgs.msg import RobotCommand # Example custom command message
+
+# from .ai_core_module import AICore
+
+class ROSAIInterface(Node):
+    def __init__(self):
+        super().__init__('ai_agent_node')
+        self.ai_core = AICore()
+
+        # ROS Publishers
+        self.publisher_ = self.create_publisher(Twist, 'cmd_vel', 10)
+        # self.command_publisher = self.create_publisher(RobotCommand, 'robot_command_topic', 10) # Example for custom command message
+
+        # ROS Subscribers
+        self.subscription = self.create_subscription(
+            Float32, # Replace with your custom SensorData message
+            'sensor_topic',
+            self.sensor_callback,
+            10
+        )
+        self.get_logger().info('Subscribing to /sensor_topic')
+
+        self.timer = self.create_timer(0.1, self.timer_callback) # 10 Hz control loop
+
+    def sensor_callback(self, msg: Float32):
+        sensor_data_for_ai = {
+            "current_distance": msg.data,
+            "current_angle": 0.0,
+            "objects_in_view": []
+        }
+        self.ai_core.update_state(sensor_data_for_ai)
+        self.get_logger().info(f'Received sensor data and updated AI state: {sensor_data_for_ai}')
+
+    def timer_callback(self):
+        # 1. Optionally, generate new sensor data or fetch latest state for AI core
+        #    If sensor_callback is used, the AI core's state is already updated.
+        #    Here, we assume AICore's `process_sensor_data` can be called without new sensor data
+        #    if its internal state is sufficient.
+        dummy_sensor_data = {"distance_front": 1.5, "camera_objects": ["obstacle"]}
+        ai_commands = self.ai_core.process_sensor_data(dummy_sensor_data)
+
+        # 2. Translate AI commands to ROS message format
+        twist_msg = Twist()
+        twist_msg.linear.x = ai_commands.get("linear_velocity", 0.0)
+        twist_msg.angular.z = ai_commands.get("angular_velocity", 0.0)
+
+        # 3. Publish the ROS message
+        self.publisher_.publish(twist_msg)
+        self.get_logger().info(f'Publishing: "{twist_msg.linear.x}, {twist_msg.angular.z}"')
+
+        # Example for custom command message:
+        # custom_cmd_msg = RobotCommand()
+        # custom_cmd_msg.action = ai_commands.get("high_level_action", "idle")
+        # self.command_publisher.publish(custom_cmd_msg)
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    ai_interface = ROSAIInterface()
+    rclpy.spin(ai_interface)
+    ai_interface.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+Key points in the command publishing flow:
+
+-   **`AICore.process_sensor_data()`**: This method is called to get the latest decisions from your AI agent. In a real scenario, this might be triggered by a timer (as shown) or by changes in the AI's internal state.
+-   **Translation to ROS Message**: The dictionary of commands returned by `AICore` is then translated into the appropriate ROS 2 message type (e.g., `geometry_msgs.msg.Twist` for velocity commands). If you have custom complex commands, you would create and use your own custom ROS 2 message definition.
+-   **Publishing**: The `publisher_.publish(twist_msg)` line sends the constructed ROS message to the specified topic (`/cmd_vel`).
+
+This continuous loop of receiving sensor data, processing it with the AI agent, and publishing commands forms the core of an AI-driven ROS 2 robotic system.
+
+## State Management Between AI Decision Cycles and ROS Callbacks
+
+Effective state management is critical for ensuring that your AI agent makes informed decisions based on the most current sensor data and that these decisions are translated into timely robot actions. The asynchronous nature of ROS 2 callbacks (for subscribers) and periodic timers (for AI decision cycles/publishing) requires careful handling of shared state.
+
+### Challenges in State Management
+
+1.  **Concurrency**: ROS callbacks can be triggered at any time, potentially updating sensor data while the AI agent is in the middle of a decision cycle.
+2.  **Data Freshness**: Ensuring the AI agent always operates on the freshest sensor data.
+3.  **Consistency**: Maintaining a consistent view of the robot's environment and internal state across different threads or execution contexts.
+
+### Recommended Approach: Centralized AI State
+
+The `AICore` class is designed to hold the centralized state of your AI agent. The `ROSAIInterface` acts as the intermediary, ensuring that this state is updated by ROS callbacks and accessed by AI decision functions in a controlled manner.
+
+#### 1. Updating State from ROS Callbacks
+
+As demonstrated in the `sensor_callback` example for `FR-029`, incoming sensor data from ROS topics should be immediately processed and used to update the `AICore`'s internal state.
+
+```python
+# ros_interface_module.py (excerpt from sensor_callback)
+
+def sensor_callback(self, msg: Float32):
+    sensor_data_for_ai = {
+        "current_distance": msg.data,
+        "current_angle": 0.0,
+        "objects_in_view": []
+    }
+    self.ai_core.update_state(sensor_data_for_ai) # Update AICore's internal state
+    self.get_logger().info(f'Received sensor data and updated AI state: {sensor_data_for_ai}')
+```
+
+By calling `self.ai_core.update_state()`, the `AICore` maintains an up-to-date representation of its environment, decoupled from the specifics of ROS messages.
+
+#### 2. Accessing State for AI Decision Cycles
+
+The `AICore`'s decision-making method (`process_sensor_data` in our example) should access its internal state to generate commands. This method can be called periodically by a ROS timer in the `ROSAIInterface`.
+
+```python
+# ros_interface_module.py (excerpt from timer_callback)
+
+def timer_callback(self):
+    # The AI core retrieves its internal state for decision making
+    # In AICore, process_sensor_data would implicitly use self.internal_state
+    ai_commands = self.ai_core.process_sensor_data(self.ai_core.internal_state) # Pass current state if AICore needs it explicitly
+    # ... (publish commands) ...
+```
+
+**Note**: For simplicity, in `ai_core_module.py`, `process_sensor_data` takes `sensor_data` as an argument. In a more complex scenario, `AICore` would likely maintain `self.internal_state` and `process_sensor_data` would just operate on `self.internal_state` or take minimal new inputs.
+
+### Ensuring Thread Safety (Advanced Topic)
+
+In scenarios where ROS callbacks and AI decision cycles might run in separate threads (e.g., using `MultiThreadedExecutor`), you would need to implement thread-safe mechanisms (like `threading.Lock` or `Queue`s) to protect the `AICore`'s internal state from simultaneous read/write access. For single-threaded executors (common in simpler `rclpy` setups), this is less of a concern, as callbacks and timers are typically serialized.
+
+By centralizing the AI state within the `AICore` and using explicit update and access patterns, you can effectively manage the flow of information between dynamic ROS callbacks and your AI agent's decision-making logic.
+
+## Introducing Action Servers for Long-Running AI Behaviors
+
+While topics and services are suitable for continuous data streams and immediate request-response patterns, some AI behaviors require executing long-running, goal-oriented tasks that provide intermediate feedback and allow for preemption. For these scenarios, ROS 2 **Actions** are the ideal communication mechanism.
+
+An action consists of three parts:
+
+1.  **Goal**: The request sent to the action server (e.g., "navigate to X, Y").
+2.  **Feedback**: Periodic updates from the action server about the progress towards the goal (e.g., "robot is at 20% of the path").
+3.  **Result**: The final outcome of the action (e.g., "navigation successful", "navigation failed").
+
+### Action Server Implementation (rclpy)
+
+An action server is typically implemented within a ROS 2 node, often residing in the `ROSAIInterface` or a dedicated action server wrapper. It listens for new goals, executes the long-running task, publishes feedback, and eventually sends a result. It also handles preemption requests from clients.
+
+Let's consider an example where an AI agent needs to perform a `NavigateToWaypoint` action. First, you would define your action interface (e.g., `geometry_msgs.action.NavigateToPose` or a custom action).
+
+```python
+# ros_interface_module.py (excerpt for Action Server)
+
+import rclpy
+from rclpy.action import ActionServer
+from rclpy.node import Node
+
+# Using a standard action for demonstration
+from turtlesim.action import RotateAbsolute # Example action type
+
+class ROSAIInterface(Node):
+    def __init__(self):
+        super().__init__('ai_agent_node')
+        self.ai_core = AICore()
+
+        # ... (publishers, subscribers, timers) ...
+
+        # Create an Action Server
+        self._action_server = ActionServer(
+            self,
+            RotateAbsolute, # Replace with your action type (e.g., NavigateToPose)
+            'rotate_absolute',
+            self.execute_callback
+        )
+        self.get_logger().info('Action server for RotateAbsolute started.')
+
+    def execute_callback(self, goal_handle):
+        self.get_logger().info(f'Received goal: {goal_handle.request.theta}')
+
+        # --- AI Agent Logic for Long-Running Task ---
+        # Here, your AI core would process the goal and start the behavior.
+        # This could involve complex path planning, object manipulation, etc.
+        # For demonstration, we simulate a long-running rotation.
+
+        feedback_msg = RotateAbsolute.Feedback()
+        feedback_msg.remaining = goal_handle.request.theta # Simulate progress
+
+        # Simulate executing the action with feedback
+        for i in range(10):
+            if goal_handle.is_cancel_requested:
+                goal_handle.canceled()
+                self.get_logger().info('Goal canceled')
+                return RotateAbsolute.Result()
+
+            feedback_msg.remaining = float(goal_handle.request.theta * (1 - (i / 10.0)))
+            self.get_logger().info(f'Publishing feedback: {feedback_msg.remaining}')
+            goal_handle.publish_feedback(feedback_msg)
+            self.get_clock().sleep_for_nanoseconds(1_000_000_000) # Sleep for 1 second
+
+        goal_handle.succeeded()
+        result = RotateAbsolute.Result()
+        result.delta = 0.0 # Simulate final result
+        self.get_logger().info('Goal succeeded')
+        return result
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    ai_interface = ROSAIInterface()
+    rclpy.spin(ai_interface)
+    ai_interface.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+In this example:
+
+-   `ActionServer` is initialized with the action type (`RotateAbsolute`), the action name (`rotate_absolute`), and an `execute_callback` function.
+-   The `execute_callback` is where the AI logic for handling the goal resides. It receives a `goal_handle` which allows it to access the goal request, publish feedback, and set the final result (succeeded, aborted, or canceled).
+-   The example simulates a long-running task by sleeping and publishing feedback periodically.
+-   It also demonstrates how to check for `goal_handle.is_cancel_requested` to allow for preemption.
+
+Integrating action servers allows your AI agents to manage complex, multi-step behaviors in a structured and feedback-rich manner, making them suitable for tasks like navigation, manipulation, or complex interaction sequences.
+
+## Introducing Action Clients for Requesting AI Behaviors
+
+To interact with an action server, your ROS 2 system needs an **Action Client**. An action client is responsible for sending goals to the action server, monitoring the progress of the action through feedback, and ultimately receiving the final result. This allows other parts of your robot's control system or even other AI agents to request complex behaviors from the AI agent running the action server.
+
+### Action Client Implementation (rclpy)
+
+An action client can be implemented in any ROS 2 node. It typically involves:
+
+1.  Creating an `ActionClient` instance.
+2.  Sending a goal to the action server.
+3.  Handling the future for the goal acceptance.
+4.  Handling the future for the result, optionally processing feedback during execution.
+
+Let's create a separate simple ROS 2 node (`ai_client_node.py`) that acts as an action client to request the `RotateAbsolute` action from our previous example.
+
+```python
+# ai_client_node.py
+
+import rclpy
+from rclpy.action import ActionClient
+from rclpy.node import Node
+from turtlesim.action import RotateAbsolute
+
+class AIActionClient(Node):
+
+    def __init__(self):
+        super().__init__('ai_action_client')
+        self._action_client = ActionClient(self, RotateAbsolute, 'rotate_absolute')
+        self.get_logger().info('Action client for RotateAbsolute created.')
+
+    def send_goal(self, theta):
+        goal_msg = RotateAbsolute.Goal()
+        goal_msg.theta = float(theta)
+
+        self.get_logger().info('Waiting for action server...')
+        self._action_client.wait_for_server()
+
+        self.get_logger().info(f'Sending goal: {theta}')
+        self._send_goal_future = self._action_client.send_goal_async(
+            goal_msg,
+            feedback_callback=self.feedback_callback
+        )
+
+        self._send_goal_future.add_done_callback(self.goal_response_callback)
+
+    def goal_response_callback(self, future):
+        goal_handle = future.result()
+        if not goal_handle.accepted:
+            self.get_logger().info('Goal rejected :(')
+            return
+
+        self.get_logger().info('Goal accepted :)')
+
+        self._get_result_future = goal_handle.get_result_async()
+        self._get_result_future.add_done_callback(self.get_result_callback)
+
+    def get_result_callback(self, future):
+        result = future.result().result
+        self.get_logger().info(f'Result: {result.delta}')
+        rclpy.shutdown()
+
+    def feedback_callback(self, feedback_msg):
+        self.get_logger().info(f'Received feedback: {feedback_msg.feedback.remaining}')
+
+
+def main(args=None):
+    rclpy.init(args=args)
+
+    action_client = AIActionClient()
+    action_client.send_goal(3.14) # Request a rotation of pi radians
+
+    rclpy.spin(action_client)
+
+
+if __name__ == '__main__':
+    main()
+```
+
+In this action client example:
+
+-   An `ActionClient` is created, specifying the action type (`RotateAbsolute`) and the action name (`rotate_absolute`).
+-   The `send_goal` method constructs a `RotateAbsolute.Goal` message and sends it asynchronously using `send_goal_async`. It also registers `feedback_callback` to receive periodic updates.
+-   `goal_response_callback` is called when the action server either accepts or rejects the goal.
+-   If the goal is accepted, `get_result_async` is called to await the final result, with `get_result_callback` handling the outcome.
+-   `feedback_callback` processes intermediate progress updates from the server.
+
+By using action clients, you enable other parts of your robotic system or even other higher-level AI components to orchestrate complex behaviors from your AI agents in a structured, observable, and interruptible manner.
+
+## Demonstrating Feedback Mechanisms During Action Execution
+
+One of the primary advantages of ROS 2 Actions over simple topics/services for long-running tasks is the built-in mechanism for providing continuous feedback. This allows action clients to monitor the progress of a goal in real-time and provides valuable information for debugging, user interfaces, or higher-level decision-making processes.
+
+### Feedback from the Action Server
+
+As shown in the `execute_callback` of the `ROSAIInterface` (our action server example), feedback is published periodically using `goal_handle.publish_feedback()`.
+
+```python
+# ros_interface_module.py (excerpt from execute_callback)
+
+def execute_callback(self, goal_handle):
+    # ...
+    feedback_msg = RotateAbsolute.Feedback()
+    feedback_msg.remaining = goal_handle.request.theta # Initialize or set progress
+
+    for i in range(10):
+        # ... (check for cancel, perform work) ...
+        feedback_msg.remaining = float(goal_handle.request.theta * (1 - (i / 10.0)))
+        self.get_logger().info(f'Publishing feedback: {feedback_msg.remaining}')
+        goal_handle.publish_feedback(feedback_msg) # Publish feedback
+        self.get_clock().sleep_for_nanoseconds(1_000_000_000)
+    # ...
+```
+
+-   The `RotateAbsolute.Feedback()` message is created and populated with relevant progress information (e.g., `remaining` angle).
+-   `goal_handle.publish_feedback(feedback_msg)` sends this message to all connected action clients.
+-   It's crucial to publish meaningful feedback that helps the client understand the current state of the long-running task.
+
+### Receiving Feedback in the Action Client
+
+On the client side, a `feedback_callback` function is registered when the goal is sent, as seen in the `AIActionClient` example.
+
+```python
+# ai_client_node.py (excerpt from send_goal and feedback_callback)
+
+class AIActionClient(Node):
+    # ...
+    def send_goal(self, theta):
+        # ...
+        self._send_goal_future = self._action_client.send_goal_async(
+            goal_msg,
+            feedback_callback=self.feedback_callback # Register feedback callback
+        )
+        # ...
+
+    def feedback_callback(self, feedback_msg):
+        self.get_logger().info(f'Received feedback: {feedback_msg.feedback.remaining}')
+```
+
+-   The `feedback_callback` method is automatically invoked by `rclpy` whenever the action server publishes a feedback message.
+-   The `feedback_msg` argument contains the `feedback` attribute, which is an instance of your action's feedback message type (e.g., `RotateAbsolute.Feedback`).
+-   Clients can then use this information to update their internal state, display progress to a user, or make adaptive decisions.
+
+By leveraging these feedback mechanisms, you create more responsive and interactive AI-driven robotic systems, where clients are not just passively waiting for a result but are actively informed about the ongoing progress of complex behaviors.
+
+## Asynchronous Programming Patterns (`async/await`) in ROS 2 Python
+
+Modern Python offers powerful asynchronous programming capabilities through the `asyncio` library and the `async`/`await` syntax. ROS 2 `rclpy` is designed to integrate seamlessly with `asyncio`, allowing you to write more efficient, non-blocking, and concurrent ROS nodes, especially beneficial for AI agents that might need to perform CPU-intensive computations, network requests, or manage multiple long-running tasks without blocking the ROS event loop.
+
+### Why `async`/`await` in ROS 2?
+
+-   **Non-blocking operations**: Perform I/O-bound tasks (e.g., waiting for sensor data, communicating with external APIs, saving data to disk) without freezing your ROS node.
+-   **Concurrency**: Manage multiple independent tasks within a single thread, reducing overhead compared to multi-threading for certain workloads.
+-   **Responsiveness**: Keep your ROS node responsive to incoming messages and timer events even when performing complex operations.
+
+### Basic `asyncio` Concepts
+
+-   **`async def`**: Defines a coroutine, a function that can be paused and resumed.
+-   **`await`**: Used inside a coroutine to pause its execution until an awaitable (e.g., another coroutine, a future, a task) completes. This allows the `asyncio` event loop to run other tasks during the pause.
+-   **Event Loop**: The core of `asyncio`, responsible for scheduling and executing coroutines.
+
+### `rclpy` Integration with `asyncio`
+
+`rclpy` provides `rclpy.spin_until_future_complete` and `rclpy.Future` objects that can be awaited, making it straightforward to integrate asynchronous logic into your ROS nodes.
+
+#### Example: Asynchronous ROS 2 Node
+
+Let's modify our `ROSAIInterface` to demonstrate a simple `asyncio` pattern where the AI core might perform an asynchronous operation.
+
+```python
+# ros_interface_module_async.py
+
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import Twist
+import asyncio # Import the asyncio library
+
+class AsyncAICore:
+    def __init__(self):
+        self.internal_state = {}
+
+    async def process_sensor_data_async(self, sensor_data: dict) -> dict:
+        self.internal_state.update(sensor_data)
+        self.get_logger().info("AI Core processing data asynchronously...")
+        await asyncio.sleep(0.5) # Simulate an asynchronous, time-consuming operation
+        self.get_logger().info("AI Core finished processing.")
+        return {"linear_velocity": 0.2, "angular_velocity": 0.1}
+
+    def update_state(self, new_state_info: dict):
+        self.internal_state.update(new_state_info)
+
+class AsyncROSAIInterface(Node):
+    def __init__(self):
+        super().__init__('async_ai_agent_node')
+        self.ai_core = AsyncAICore() # Use the asynchronous AI core
+
+        self.publisher_ = self.create_publisher(Twist, 'cmd_vel', 10)
+        self.timer = self.create_timer(1.0, self.timer_callback_async) # Use an async callback for timer
+
+    async def timer_callback_async(self):
+        # Simulate receiving sensor data
+        dummy_sensor_data = {"distance_front": 2.0, "camera_objects": ["tree"]}
+
+        # Await the asynchronous AI core decision function
+        ai_commands = await self.ai_core.process_sensor_data_async(dummy_sensor_data)
+
+        twist_msg = Twist()
+        twist_msg.linear.x = ai_commands.get("linear_velocity", 0.0)
+        twist_msg.angular.z = ai_commands.get("angular_velocity", 0.0)
+
+        self.publisher_.publish(twist_msg)
+        self.get_logger().info(f'Publishing async: "{twist_msg.linear.x}, {twist_msg.angular.z}"')
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = AsyncROSAIInterface()
+
+    # Use rclpy.spin with a custom executor for asyncio integration
+    executor = rclpy.executors.SingleThreadedExecutor()
+    executor.add_node(node)
+
+    try:
+        # rclpy.spin_until_future_complete is good for one-off tasks,
+        # but for continuous spinning with async callbacks, use asyncio directly.
+        asyncio.get_event_loop().run_until_complete(executor.spin_once(timeout_sec=0))
+        # The above line is just for showing one spin. For continuous operation:
+        # asyncio.get_event_loop().run_forever() or use rclpy.spin with AsyncioExecutor
+
+        # A more robust way to spin with asyncio: use AsyncioExecutor
+        # from rclpy.executors.asyncio import AsyncioExecutor
+        # executor = AsyncioExecutor()
+        # executor.add_node(node)
+        # rclpy.spin(node, executor=executor)
+
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+**Important Considerations for `asyncio` and `rclpy`:**
+
+-   **Executors**: When using `async`/`await` with `rclpy`, you often need to use a custom executor, such as `rclpy.executors.AsyncioExecutor`, to ensure the `asyncio` event loop is properly integrated with ROS 2's spinning mechanism.
+-   **Non-blocking `await`**: Always `await` coroutines that perform potentially blocking operations (like I/O, network calls, or long computations that are designed to be asynchronous).
+-   **Shared State**: Even with `asyncio`, if multiple coroutines modify shared state, consider using `asyncio.Lock` for protection, although `rclpy` callbacks are typically serialized within a `SingleThreadedExecutor`.
+
+Mastering `async`/`await` can significantly improve the performance and responsiveness of complex AI agents in ROS 2, allowing for sophisticated behaviors without compromising the real-time requirements of robotic control.
+
+## Latency Considerations for Real-Time Control
+
+In real-time robotic control, **latency** refers to the delay between a sensor reading (an event) and the corresponding actuator command being executed. High or inconsistent latency can severely degrade system performance, leading to instability, inaccurate movements, and even safety issues. When integrating AI agents with ROS 2 for humanoid robots, minimizing and managing latency is paramount.
+
+### Sources of Latency
+
+1.  **Sensor Acquisition Latency**: Time taken for a sensor to acquire data and make it available.
+2.  **Communication Latency (ROS 2)**: Time for messages to travel between nodes, influenced by DDS configuration, network conditions, and message queue sizes.
+3.  **AI Processing Latency**: Time taken by the AI agent to process sensor data, make decisions, and generate commands. This can be significant for complex AI models.
+4.  **Actuator Command Latency**: Time for the command to reach the actuator and for the actuator to respond.
+5.  **Operating System Scheduling**: Delays introduced by the OS scheduling processes and threads.
+
+### Impact on Control
+
+-   **Instability**: Delays can cause control loops to become unstable, leading to oscillations or divergence.
+-   **Inaccuracy**: Outdated sensor data can lead to control commands that are not appropriate for the current state of the robot.
+-   **Reduced Responsiveness**: The robot reacts slowly to changes in its environment or to new goals.
+
+### Strategies for Mitigation
+
+1.  **High-Frequency ROS 2 Topics**: For critical sensor data and command signals, use high-frequency topics (e.g., 100 Hz or more) with appropriate QoS settings (e.g., `Reliability: RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT` for fast but potentially lossy, or `RMW_QOS_POLICY_RELIABILITY_RELIABLE` for guaranteed delivery at higher latency).
+
+2.  **Optimized AI Algorithms**: Ensure your AI models are as computationally efficient as possible. Consider:
+    -   **Model Quantization/Pruning**: Reducing model size and complexity.
+    -   **Hardware Acceleration**: Utilizing GPUs, NPUs, or specialized AI accelerators.
+    -   **Asynchronous Processing**: Using `async`/`await` (as discussed in `FR-035`) to offload heavy computations without blocking the ROS event loop.
+
+3.  **Real-Time Operating Systems (RTOS)**: For hard real-time requirements, consider deploying ROS 2 on an RTOS (e.g., Ubuntu with PREEMPT_RT kernel patch, QNX, VxWorks) to ensure deterministic scheduling.
+
+4.  **Dedicated Computing Hardware**: Separate critical control loops onto dedicated hardware with minimal other processes.
+
+5.  **QoS Policies (Quality of Service)**: Fine-tune ROS 2 QoS settings for each topic to match the latency requirements:
+    -   **`depth`**: Size of the message queue.
+    -   **`durability`**: Whether transient local or volatile.
+    -   **`deadline`**: Expected period between messages (for monitoring delays).
+    -   **`liveliness`**: How the system detects if a publisher is still alive.
+
+6.  **State Prediction/Compensation**: In some cases, if latency is consistent, the control system can use predictive models to estimate the robot's state at the time the command will be executed.
+
+7.  **Minimize Data Copying**: Reduce unnecessary data copying between memory locations by carefully designing message types and data structures.
+
+By systematically identifying latency sources and applying these mitigation strategies, you can develop AI-driven humanoid robots that exhibit precise, stable, and responsive real-time control.
+
+## Skeleton Code for Simple AI Agent with TODO Markers
+
+To help you get started with building your own AI-driven ROS 2 agent, here is a consolidated skeleton of the `AICore` and `ROSAIInterface` classes with `TODO` markers. These markers indicate where you should focus your implementation efforts to integrate your specific AI logic and connect it to the ROS 2 ecosystem.
+
+### `ai_core_module.py` Skeleton
+
+```python
+# ai_core_module.py
+
+class AICore:
+    def __init__(self):
+        # TODO: Initialize your AI agent's internal state variables, models, etc.
+        self.internal_state = {
+            "current_robot_pose": None,
+            "detected_objects": [],
+            "mission_goal": "explore"
+        }
+
+    def process_sensor_data(self, sensor_data: dict) -> dict:
+        # TODO: Implement your core AI decision-making logic here.
+        # This function should take processed sensor data and return commands.
+        # Example: Simple obstacle avoidance
+        if sensor_data.get("current_distance", 99.0) < 1.0:
+            self.get_logger().warn("Obstacle detected! Turning...")
+            return {"linear_velocity": 0.0, "angular_velocity": 0.5} # Turn right
+        else:
+            return {"linear_velocity": 0.2, "angular_velocity": 0.0} # Move forward
+
+    def update_state(self, new_state_info: dict):
+        # TODO: Implement how incoming sensor data updates the AI's internal state.
+        self.internal_state.update(new_state_info)
+        self.get_logger().info(f'AI internal state updated: {self.internal_state}')
+
+    # TODO: Add more AI-specific methods as needed (e.g., path_planner(), object_detector())
+
+```
+
+### `ros_interface_module.py` Skeleton
+
+```python
+# ros_interface_module.py
+
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import Twist
+from example_interfaces.msg import Float32 # Using a standard message for simplicity
+# TODO: Import your custom ROS 2 messages if you define any
+# from your_custom_msgs.msg import SensorData
+# from your_custom_msgs.msg import RobotCommand
+
+# Import your AICore
+# from .ai_core_module import AICore
+
+class ROSAIInterface(Node):
+    def __init__(self):
+        super().__init__('ai_agent_node')
+        self.ai_core = AICore() # Instantiate your AI core
+
+        # TODO: Initialize ROS Publishers
+        self.publisher_ = self.create_publisher(Twist, 'cmd_vel', 10)
+        # self.custom_command_publisher = self.create_publisher(RobotCommand, 'custom_robot_command', 10)
+
+        # TODO: Initialize ROS Subscribers
+        self.subscription = self.create_subscription(
+            Float32, # TODO: Replace with your actual sensor message type
+            'sensor_topic',
+            self.sensor_callback,
+            10
+        )
+        self.get_logger().info('Subscribing to /sensor_topic')
+
+        # TODO: Configure timer for AI decision cycle and command publishing frequency
+        self.timer = self.create_timer(0.1, self.timer_callback) # 10 Hz control loop
+
+        # TODO: If using Action Servers/Clients, initialize them here
+        # from rclpy.action import ActionServer
+        # from turtlesim.action import RotateAbsolute
+        # self._action_server = ActionServer(self, RotateAbsolute, 'rotate_absolute', self.execute_callback)
+
+    def sensor_callback(self, msg: Float32):
+        # TODO: Translate incoming ROS sensor message to AI-friendly format
+        sensor_data_for_ai = {
+            "current_distance": msg.data,
+            "current_angle": 0.0, # Placeholder
+            "detected_objects": [] # Placeholder
+        }
+        self.ai_core.update_state(sensor_data_for_ai)
+        self.get_logger().info(f'Received sensor data and updated AI state: {sensor_data_for_ai}')
+
+    def timer_callback(self):
+        # TODO: Call AI core to get new commands based on internal state
+        ai_commands = self.ai_core.process_sensor_data(self.ai_core.internal_state)
+
+        # TODO: Translate AI commands to ROS message format and publish
+        twist_msg = Twist()
+        twist_msg.linear.x = ai_commands.get("linear_velocity", 0.0)
+        twist_msg.angular.z = ai_commands.get("angular_velocity", 0.0)
+        self.publisher_.publish(twist_msg)
+        self.get_logger().info(f'Publishing: "{twist_msg.linear.x}, {twist_msg.angular.z}"')
+
+    # TODO: Implement execute_callback for Action Server if used
+    # def execute_callback(self, goal_handle):
+    #     # ... (AI logic for action goal, feedback, result) ...
+    #     pass
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    ai_interface = ROSAIInterface()
+    rclpy.spin(ai_interface)
+    ai_interface.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+These skeletons provide a clear starting point. Remember to replace `TODO` comments with your actual implementation, ensuring your AI logic and ROS 2 communication are robustly integrated.
+
+## Testing AI-ROS Integration in a Simulation Environment
+
+Testing the integration of your AI agent with the ROS 2 control system in a simulation environment is a critical step before deploying to a physical robot. Simulation allows for rapid iteration, safe experimentation, and reproducible testing scenarios. Gazebo is the most widely used 3D robot simulator in the ROS community.
+
+### Key Tools for Simulation Testing
+
+1.  **Gazebo**: A powerful 3D simulator for robots, environments, and sensor generation. It integrates deeply with ROS 2, allowing your ROS nodes to communicate with virtual sensors and actuators as if they were real.
+2.  **RViz2**: A 3D visualization tool for ROS 2. You can visualize your robot model, sensor data, planning outputs, and more, which is invaluable for understanding your AI agent's behavior.
+3.  **ROS 2 CLI Tools**: Commands like `ros2 topic echo`, `ros2 node info`, `ros2 action list/info/send_goal` are essential for monitoring and interacting with your simulated system.
+4.  **`ros2_control`**: A framework for common robot hardware abstraction, allowing you to easily switch between simulated and real robot controllers.
+
+### General Testing Workflow
+
+#### 1. Launch the Simulation Environment
+
+Typically, this involves launching Gazebo with your robot's URDF/XACRO model and any custom plugins for sensors or controllers.
+
+```bash
+# Example: Launching a robot in Gazebo (requires a launch file)
+ros2 launch my_robot_bringup my_robot_simulation.launch.py
+```
+
+This launch file would typically:
+
+-   Start Gazebo.
+-   Load the robot description (`robot_state_publisher`, `joint_state_publisher`).
+-   Load `ros2_control` controllers (e.g., joint trajectory controllers, velocity controllers).
+-   Spawn your robot model into the Gazebo world.
+
+#### 2. Launch Your AI Agent (ROS Node)
+
+Start your `ROSAIInterface` node (and potentially `AIActionClient` if testing actions) in the same ROS 2 domain as the simulation.
+
+```bash
+ros2 run my_ai_package ros_interface_module.py # Or your packaged executable
+ros2 run my_ai_package ai_client_node.py # If testing actions from a client
+```
+
+#### 3. Monitor and Debug
+
+-   **RViz2**: Launch RViz2 and add displays for your robot model, topics (e.g., `/cmd_vel`, `/sensor_topic`), and TF frames to visualize the robot's state and AI outputs.
+-   **`ros2 topic echo`**: Listen to command topics (e.g., `/cmd_vel`) to verify that your AI is publishing expected commands.
+-   **`ros2 topic hz`**: Check the publishing rate of critical topics to ensure real-time performance.
+-   **`ros2 node info /ai_agent_node`**: Inspect the active subscriptions, publications, and services of your AI node.
+-   **Action Client/Server Monitoring**: Use `ros2 action list`, `ros2 action info <action_name>`, and `ros2 action send_goal <action_name> <action_type> <goal>` to interact with and debug action-based behaviors.
+-   **Gazebo GUI**: Directly observe the robot's movements and sensor readings within the Gazebo interface.
+
+#### 4. Test Scenarios
+
+Design specific test cases to validate your AI's behavior:
+
+-   **Navigation**: Does the robot reach its goal? Does it avoid obstacles?
+-   **Manipulation**: Does it grasp objects correctly? Does it follow trajectories?
+-   **Error Handling**: How does the AI react to sensor noise, missing data, or unexpected environmental changes?
+-   **Performance**: Does the AI maintain real-time constraints? Is decision latency acceptable?
+
+By systematically utilizing these simulation tools and a well-defined testing methodology, you can thoroughly validate your AI-ROS integration, identify potential issues, and refine your agent's performance in a safe and efficient virtual environment.
+
+
+
+
+
+
+
+
+
+
+
